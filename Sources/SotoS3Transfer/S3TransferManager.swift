@@ -68,11 +68,11 @@ public struct S3TransferManager {
         return fileIO.openFile(path: from, eventLoop: eventLoop)
             .flatMap { fileHandle, fileRegion in
                 let fileSize = fileRegion.readableBytes
-                let payload: AWSPayload = .fileHandle(fileHandle, offset: 0, size: fileSize, fileIO: fileIO) { downloaded in
+                let payload: AWSPayload = .fileHandle(fileHandle, offset: 0, size: fileSize, fileIO: self.fileIO) { downloaded in
                     try progress(Double(downloaded) / Double(fileSize))
                 }
                 let request = S3.PutObjectRequest(body: payload, bucket: to.bucket, key: to.path)
-                return s3.putObject(request, on: eventLoop).map { _ in }.closeFileHandle(fileHandle)
+                return self.s3.putObject(request, on: eventLoop).map { _ in }.closeFileHandle(fileHandle)
             }
     }
 
@@ -102,23 +102,23 @@ public struct S3TransferManager {
                 try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
             }
         }.flatMap {
-            fileIO.openFile(path: to, mode: .write, flags: .allowFileCreation(), eventLoop: eventLoop)
+            self.fileIO.openFile(path: to, mode: .write, flags: .allowFileCreation(), eventLoop: eventLoop)
         }.flatMap { fileHandle -> EventLoopFuture<S3.GetObjectOutput> in
-                // get filesize so we can calculate progress
-                return s3.headObject(.init(bucket: from.bucket, key: from.path))
-                    .flatMap { response in
-                        let fileSize = response.contentLength ?? 1
-                        let request = S3.GetObjectRequest(bucket: from.bucket, key: from.path)
-                        return s3.getObjectStreaming(request, on: eventLoop) { byteBuffer, eventLoop in
-                            let bufferSize = byteBuffer.readableBytes
-                            return fileIO.write(fileHandle: fileHandle, buffer: byteBuffer, eventLoop: eventLoop).flatMapThrowing { _ in
-                                bytesDownloaded += bufferSize
-                                try progress(Double(bytesDownloaded) / Double(fileSize))
-                            }
+            // get filesize so we can calculate progress
+            return self.s3.headObject(.init(bucket: from.bucket, key: from.path))
+                .flatMap { response in
+                    let fileSize = response.contentLength ?? 1
+                    let request = S3.GetObjectRequest(bucket: from.bucket, key: from.path)
+                    return self.s3.getObjectStreaming(request, on: eventLoop) { byteBuffer, eventLoop in
+                        let bufferSize = byteBuffer.readableBytes
+                        return self.fileIO.write(fileHandle: fileHandle, buffer: byteBuffer, eventLoop: eventLoop).flatMapThrowing { _ in
+                            bytesDownloaded += bufferSize
+                            try progress(Double(bytesDownloaded) / Double(fileSize))
                         }
                     }
-                    .closeFileHandle(fileHandle)
-            }.map { _ in }
+                }
+                .closeFileHandle(fileHandle)
+        }.map { _ in }
     }
 
     /// Copy from S3 file, to S3 file
@@ -339,7 +339,7 @@ extension S3TransferManager {
                 let path = file.path
                 var isDirectory: ObjCBool = false
                 // ignore if it is a directory
-                FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+                _ = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
                 guard !isDirectory.boolValue else { continue }
                 // get modification data and append along with file name
                 let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
