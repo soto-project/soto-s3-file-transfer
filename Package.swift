@@ -16,7 +16,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "soto-s3transfer",
+    name: "soto-s3-transfer",
     products: [
         .library(name: "SotoS3Transfer", targets: ["SotoS3Transfer"]),
     ],
