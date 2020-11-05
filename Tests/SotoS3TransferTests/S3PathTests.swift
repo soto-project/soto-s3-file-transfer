@@ -12,9 +12,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-import XCTest
 import SotoS3
 @testable import SotoS3Transfer
+import XCTest
 
 final class S3PathTests: XCTestCase {
     func testS3Folder() {
@@ -77,5 +77,4 @@ final class S3PathTests: XCTestCase {
         XCTAssertEqual(nameWithoutExtension, "file")
         XCTAssertEqual(`extension`, "txt")
     }
-
 }

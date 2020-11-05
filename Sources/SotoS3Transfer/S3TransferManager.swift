@@ -51,7 +51,7 @@ public struct S3TransferManager {
 
     /// Shutdown S3 Transfer manager. Delete thread pool, if one was created by manager
     public func syncShutdown() throws {
-        if case .createNew = threadPoolProvider {
+        if case .createNew = self.threadPoolProvider {
             threadPool.shutdownGracefully { _ in }
         }
     }
@@ -62,10 +62,10 @@ public struct S3TransferManager {
     ///   - to: S3 file
     ///   - progress: progress function, updated with value from 0 to 1 based on how much we have uploaded
     /// - Returns: EventLoopFuture fulfilled when operation is complete
-    public func copy(from: String, to: S3File, progress: @escaping (Double) throws -> () = { _ in}) -> EventLoopFuture<Void> {
-        logger.info("Copy from: \(from) to \(to)")
-        let eventLoop = s3.eventLoopGroup.next()
-        return fileIO.openFile(path: from, eventLoop: eventLoop)
+    public func copy(from: String, to: S3File, progress: @escaping (Double) throws -> Void = { _ in }) -> EventLoopFuture<Void> {
+        self.logger.info("Copy from: \(from) to \(to)")
+        let eventLoop = self.s3.eventLoopGroup.next()
+        return self.fileIO.openFile(path: from, eventLoop: eventLoop)
             .flatMap { fileHandle, fileRegion in
                 let fileSize = fileRegion.readableBytes
                 let payload: AWSPayload = .fileHandle(fileHandle, offset: 0, size: fileSize, fileIO: self.fileIO) { downloaded in
@@ -82,12 +82,12 @@ public struct S3TransferManager {
     ///   - to: local filename
     ///   - progress: progress function, updated with value from 0 to 1 based on how much we have uploaded
     /// - Returns: EventLoopFuture fulfilled when operation is complete
-    public func copy(from: S3File, to: String, progress: @escaping (Double) throws -> () = { _ in}) -> EventLoopFuture<Void> {
-        logger.info("Copy from: \(from) to \(to)")
-        let eventLoop = s3.eventLoopGroup.next()
+    public func copy(from: S3File, to: String, progress: @escaping (Double) throws -> Void = { _ in }) -> EventLoopFuture<Void> {
+        self.logger.info("Copy from: \(from) to \(to)")
+        let eventLoop = self.s3.eventLoopGroup.next()
         var bytesDownloaded = 0
 
-        return threadPool.runIfActive(eventLoop: eventLoop) { () -> Void in
+        return self.threadPool.runIfActive(eventLoop: eventLoop) { () -> Void in
             // create folder to place file in, if it doesn't exist already
             let folder: String
             var isDirectory: ObjCBool = false
@@ -127,10 +127,10 @@ public struct S3TransferManager {
     ///   - to: destination S3 file
     ///   - progress: progress function, updated with value from 0 to 1 based on how much we have uploaded
     /// - Returns: EventLoopFuture fulfilled when operation is complete
-    public func copy(from: S3File, to: S3File, progress: @escaping (Double) throws -> () = { _ in}) -> EventLoopFuture<Void> {
-        logger.info("Copy from: \(from) to \(to)")
+    public func copy(from: S3File, to: S3File, progress: @escaping (Double) throws -> Void = { _ in }) -> EventLoopFuture<Void> {
+        self.logger.info("Copy from: \(from) to \(to)")
         let request = S3.CopyObjectRequest(bucket: to.bucket, copySource: "/\(from.bucket)/\(from.path)", key: to.path)
-        return s3.copyObject(request)
+        return self.s3.copyObject(request)
             .map { _ in }
     }
 
@@ -140,12 +140,12 @@ public struct S3TransferManager {
     ///   - to: Path to S3 folder
     /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func copy(from folder: String, to s3Folder: S3Folder) -> EventLoopFuture<Void> {
-        let eventLoop = s3.eventLoopGroup.next()
+        let eventLoop = self.s3.eventLoopGroup.next()
         return listFiles(in: folder)
             .flatMap { files in
                 let transfers = Self.targetFiles(files: files, from: folder, to: s3Folder)
                 let transferFutures: [EventLoopFuture<Void>] = transfers.map { self.copy(from: $0.from.name, to: $0.to) }
-                return EventLoopFuture.andAllComplete(transferFutures, on: eventLoop).map{ _ in }
+                return EventLoopFuture.andAllComplete(transferFutures, on: eventLoop).map { _ in }
             }
     }
 
@@ -155,12 +155,12 @@ public struct S3TransferManager {
     ///   - to: Local folder
     /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func copy(from s3Folder: S3Folder, to folder: String) -> EventLoopFuture<Void> {
-        let eventLoop = s3.eventLoopGroup.next()
+        let eventLoop = self.s3.eventLoopGroup.next()
         return listFiles(in: s3Folder)
             .flatMap { files in
                 let transfers = Self.targetFiles(files: files, from: s3Folder, to: folder)
                 let transferFutures: [EventLoopFuture<Void>] = transfers.map { self.copy(from: $0.from.file, to: $0.to) }
-                return EventLoopFuture.andAllComplete(transferFutures, on: eventLoop).map{ _ in }
+                return EventLoopFuture.andAllComplete(transferFutures, on: eventLoop).map { _ in }
             }
     }
 
@@ -170,12 +170,12 @@ public struct S3TransferManager {
     ///   - to: Path to destination S3 folder
     /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func copy(from srcFolder: S3Folder, to destFolder: S3Folder) -> EventLoopFuture<Void> {
-        let eventLoop = s3.eventLoopGroup.next()
+        let eventLoop = self.s3.eventLoopGroup.next()
         return listFiles(in: srcFolder)
             .flatMap { files in
                 let transfers = Self.targetFiles(files: files, from: srcFolder, to: destFolder)
                 let transferFutures: [EventLoopFuture<Void>] = transfers.map { self.copy(from: $0.from.file, to: $0.to) }
-                return EventLoopFuture.andAllComplete(transferFutures, on: eventLoop).map{ _ in }
+                return EventLoopFuture.andAllComplete(transferFutures, on: eventLoop).map { _ in }
             }
     }
 
@@ -188,14 +188,14 @@ public struct S3TransferManager {
     ///   - delete: Should we delete files on S3 that don't exists locally
     /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func sync(from folder: String, to s3Folder: S3Folder, delete: Bool) -> EventLoopFuture<Void> {
-        let eventLoop = s3.eventLoopGroup.next()
+        let eventLoop = self.s3.eventLoopGroup.next()
 
         return listFiles(in: folder).and(listFiles(in: s3Folder))
-            .flatMap { (files, s3Files) in
+            .flatMap { files, s3Files in
                 let targetFiles = Self.targetFiles(files: files, from: folder, to: s3Folder)
                 let transfers = targetFiles.compactMap { transfer -> (from: FileDescriptor, to: S3File)? in
                     // does file exist on S3
-                    guard let s3File = s3Files.first(where: {$0.file.path == transfer.to.path }) else { return transfer }
+                    guard let s3File = s3Files.first(where: { $0.file.path == transfer.to.path }) else { return transfer }
                     // does file on S3 have a later date
                     guard s3File.modificationDate > transfer.from.modificationDate else { return transfer }
                     return nil
@@ -205,7 +205,7 @@ public struct S3TransferManager {
                 var deleteFutures: [EventLoopFuture<Void>] = []
                 if delete == true {
                     let deletions = s3Files.compactMap { s3File -> S3File? in
-                        if targetFiles.first(where: { $0.to.path == s3File.file.path } ) == nil {
+                        if targetFiles.first(where: { $0.to.path == s3File.file.path }) == nil {
                             return s3File.file
                         } else {
                             return nil
@@ -213,7 +213,7 @@ public struct S3TransferManager {
                     }
                     deleteFutures = deletions.map { self.delete($0) }
                 }
-                return EventLoopFuture.whenAllSucceed(transferFutures + deleteFutures, on: eventLoop).map{ _ in }
+                return EventLoopFuture.whenAllSucceed(transferFutures + deleteFutures, on: eventLoop).map { _ in }
             }
     }
 
@@ -226,10 +226,10 @@ public struct S3TransferManager {
     ///   - delete: Should we delete files locally that don't exists in S3
     /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func sync(from s3Folder: S3Folder, to folder: String, delete: Bool) -> EventLoopFuture<Void> {
-        let eventLoop = s3.eventLoopGroup.next()
+        let eventLoop = self.s3.eventLoopGroup.next()
 
         return listFiles(in: folder).and(listFiles(in: s3Folder))
-            .flatMap { (files, s3Files) in
+            .flatMap { files, s3Files in
                 let targetFiles = Self.targetFiles(files: s3Files, from: s3Folder, to: folder)
                 let transfers = targetFiles.compactMap { transfer -> (from: S3FileDescriptor, to: String)? in
                     // does file exist locally
@@ -243,7 +243,7 @@ public struct S3TransferManager {
                 var deleteFutures: [EventLoopFuture<Void>] = []
                 if delete == true {
                     let deletions = files.compactMap { file -> String? in
-                        if targetFiles.first(where: { $0.to == file.name } ) == nil {
+                        if targetFiles.first(where: { $0.to == file.name }) == nil {
                             return file.name
                         } else {
                             return nil
@@ -251,7 +251,7 @@ public struct S3TransferManager {
                     }
                     deleteFutures = deletions.map { self.delete($0) }
                 }
-                return EventLoopFuture.whenAllSucceed(transferFutures + deleteFutures, on: eventLoop).map{ _ in }
+                return EventLoopFuture.whenAllSucceed(transferFutures + deleteFutures, on: eventLoop).map { _ in }
             }
     }
 
@@ -264,10 +264,10 @@ public struct S3TransferManager {
     ///   - delete: Should we delete files locally that don't exists in S3
     /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func sync(from srcFolder: S3Folder, to destFolder: S3Folder, delete: Bool) -> EventLoopFuture<Void> {
-        let eventLoop = s3.eventLoopGroup.next()
+        let eventLoop = self.s3.eventLoopGroup.next()
 
         return listFiles(in: srcFolder).and(listFiles(in: destFolder))
-            .flatMap { (srcFiles, destFiles) in
+            .flatMap { srcFiles, destFiles in
                 let targetFiles = Self.targetFiles(files: srcFiles, from: srcFolder, to: destFolder)
                 let transfers = targetFiles.compactMap { transfer -> (from: S3FileDescriptor, to: S3File)? in
                     // does file exist in destination folder
@@ -281,7 +281,7 @@ public struct S3TransferManager {
                 var deleteFutures: [EventLoopFuture<Void>] = []
                 if delete == true {
                     let deletions = destFiles.compactMap { file -> S3File? in
-                        if targetFiles.first(where: { $0.to.path == file.file.path } ) == nil {
+                        if targetFiles.first(where: { $0.to.path == file.file.path }) == nil {
                             return file.file
                         } else {
                             return nil
@@ -289,25 +289,24 @@ public struct S3TransferManager {
                     }
                     deleteFutures = deletions.map { self.delete($0) }
                 }
-                return EventLoopFuture.whenAllSucceed(transferFutures + deleteFutures, on: eventLoop).map{ _ in }
+                return EventLoopFuture.whenAllSucceed(transferFutures + deleteFutures, on: eventLoop).map { _ in }
             }
     }
 
     /// delete a file on S3
     public func delete(_ s3File: S3File) -> EventLoopFuture<Void> {
-        logger.info("Deleting \(s3File)")
-        return s3.deleteObject(.init(bucket: s3File.bucket, key: s3File.path)).map { _ in }
+        self.logger.info("Deleting \(s3File)")
+        return self.s3.deleteObject(.init(bucket: s3File.bucket, key: s3File.path)).map { _ in }
     }
 
     /// delete a folder on S3
     public func delete(_ s3Folder: S3Folder) -> EventLoopFuture<Void> {
-        let eventLoop = s3.eventLoopGroup.next()
+        let eventLoop = self.s3.eventLoopGroup.next()
         return listFiles(in: s3Folder)
             .flatMap { files in
                 let deleteFutures = files.map { self.delete($0.file) }
                 return EventLoopFuture.whenAllSucceed(deleteFutures, on: eventLoop).map { _ in }
             }
-
     }
 }
 
@@ -324,8 +323,8 @@ extension S3TransferManager {
 
     /// List files in local folder
     func listFiles(in folder: String) -> EventLoopFuture<[FileDescriptor]> {
-        let eventLoop = s3.eventLoopGroup.next()
-        return threadPool.runIfActive(eventLoop: eventLoop) {
+        let eventLoop = self.s3.eventLoopGroup.next()
+        return self.threadPool.runIfActive(eventLoop: eventLoop) {
             var files: [FileDescriptor] = []
             let path = URL(fileURLWithPath: folder)
             guard let fileEnumerator = FileManager.default.enumerator(
@@ -353,10 +352,10 @@ extension S3TransferManager {
     /// List files in S3 folder
     func listFiles(in folder: S3Folder) -> EventLoopFuture<[S3FileDescriptor]> {
         let request = S3.ListObjectsV2Request(bucket: folder.bucket, prefix: folder.path)
-        return s3.listObjectsV2Paginator(request, []) { accumulator, response, eventLoop in
+        return self.s3.listObjectsV2Paginator(request, []) { accumulator, response, eventLoop in
             let files: [S3FileDescriptor] = response.contents?.compactMap {
                 guard let key = $0.key,
-                      let lastModified = $0.lastModified else { return nil }
+                    let lastModified = $0.lastModified else { return nil }
                 return S3FileDescriptor(file: S3File(bucket: folder.bucket, path: key), modificationDate: lastModified)
             } ?? []
             return eventLoop.makeSucceededFuture((true, accumulator + files))
@@ -365,9 +364,9 @@ extension S3TransferManager {
 
     /// delete a local file
     func delete(_ file: String) -> EventLoopFuture<Void> {
-        logger.info("Deleting \(file)")
-        let eventLoop = s3.eventLoopGroup.next()
-        return threadPool.runIfActive(eventLoop: eventLoop) {
+        self.logger.info("Deleting \(file)")
+        let eventLoop = self.s3.eventLoopGroup.next()
+        return self.threadPool.runIfActive(eventLoop: eventLoop) {
             try FileManager.default.removeItem(atPath: file)
         }
     }

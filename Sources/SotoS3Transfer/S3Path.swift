@@ -22,7 +22,7 @@ public protocol S3Path: Equatable, CustomStringConvertible {
 
 public extension S3Path {
     /// return in URL form `s3://<bucketname>/<path>`
-    var url: String { return "s3://\(bucket)/\(path)"}
+    var url: String { return "s3://\(bucket)/\(path)" }
 
     /// return parent folder
     func parent() -> S3Folder? {
@@ -33,7 +33,7 @@ public extension S3Path {
     }
 
     /// CustomStringConvertible protocol requirement
-    var description: String { return url }
+    var description: String { return self.url }
 }
 
 /// S3 file descriptor
@@ -60,8 +60,8 @@ public struct S3File: S3Path {
 
     /// file name without path
     public var name: String {
-        guard let slash = path.lastIndex(of: "/") else { return path }
-        return String(path[path.index(after: slash)..<path.endIndex])
+        guard let slash = path.lastIndex(of: "/") else { return self.path }
+        return String(self.path[self.path.index(after: slash)..<self.path.endIndex])
     }
 
     /// file name without path or extension
@@ -106,7 +106,7 @@ public struct S3Folder: S3Path {
     /// Return sub folder of folder
     /// - Parameter name: sub folder name
     public func subFolder(_ name: String) -> S3Folder {
-        S3Folder(bucket: bucket, path: "\(path)\(name)")
+        S3Folder(bucket: self.bucket, path: "\(self.path)\(name)")
     }
 
     /// Return file inside folder
@@ -115,10 +115,9 @@ public struct S3Folder: S3Path {
         guard name.firstIndex(of: "/") == nil else {
             preconditionFailure("Filename \(name) cannot include '/'")
         }
-        return S3File(bucket: bucket, path: "\(path)\(name)")
+        return S3File(bucket: self.bucket, path: "\(self.path)\(name)")
     }
 }
-
 
 internal extension String {
     func removingPrefix(_ prefix: String) -> String {
