@@ -87,7 +87,7 @@ final class TransferManagerTests: XCTestCase {
     func testListFiles() {
         var files: [S3TransferManager.FileDescriptor]?
         XCTAssertNoThrow(files = try Self.s3Transfer.listFiles(in: rootPath).wait())
-        XCTAssertNotNil(files?.firstIndex { $0.name == "\(rootPath)/Tests/SotoS3TransferTests/TransferManagerTests.swift" } )
+        XCTAssertNotNil(files?.firstIndex { $0.name == "\(rootPath)/Tests/SotoS3TransferTests/S3TransferManagerTests.swift" } )
         XCTAssertNil(files?.firstIndex { $0.name == "\(rootPath)/Tests/SotoS3TransferTests" } )
     }
 
