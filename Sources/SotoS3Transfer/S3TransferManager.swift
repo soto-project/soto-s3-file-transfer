@@ -88,6 +88,7 @@ public struct S3TransferManager {
         var bytesDownloaded = 0
 
         return threadPool.runIfActive(eventLoop: eventLoop) { () -> Void in
+            // create folder to place file in, if it doesn't exist already
             let folder: String
             var isDirectory: ObjCBool = false
             if let lastSlash = to.lastIndex(of: "/") {
@@ -103,6 +104,7 @@ public struct S3TransferManager {
         }.flatMap {
             fileIO.openFile(path: to, mode: .write, flags: .allowFileCreation(), eventLoop: eventLoop)
         }.flatMap { fileHandle -> EventLoopFuture<S3.GetObjectOutput> in
+                // get filesize so we can calculate progress
                 return s3.headObject(.init(bucket: from.bucket, key: from.path))
                     .flatMap { response in
                         let fileSize = response.contentLength ?? 1
