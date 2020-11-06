@@ -65,6 +65,23 @@ final class TransferManagerTests: XCTestCase {
         XCTAssertEqual(buffer, buffer2)
     }
 
+    func testMultipartUploadDownload() {
+        let filename = "\(rootPath)/\(#function)"
+        let filename2 = "\(rootPath)/\(#function)2"
+        let buffer = self.createRandomBuffer(size: 10_202_400)
+        XCTAssertNoThrow(try buffer.write(to: URL(fileURLWithPath: filename)))
+        defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename)) }
+
+        XCTAssertNoThrow(try Self.s3Transfer.copy(from: filename, to: S3File(bucket: Self.bucketName, path: "testMultipartUploadDownload")) { print($0) }.wait())
+        XCTAssertNoThrow(try Self.s3Transfer.copy(from: S3File(bucket: Self.bucketName, path: "testMultipartUploadDownload"), to: filename2) { print($0) }.wait())
+
+        defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename2)) }
+
+        var buffer2: Data?
+        XCTAssertNoThrow(try buffer2 = Data(contentsOf: URL(fileURLWithPath: filename2)))
+        XCTAssertEqual(buffer, buffer2)
+    }
+
     func testS3Copy() {
         let filename = "\(rootPath)/\(#function)"
         let filename2 = "\(rootPath)/\(#function)2"

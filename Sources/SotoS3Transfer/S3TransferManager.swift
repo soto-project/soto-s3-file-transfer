@@ -19,22 +19,47 @@ import SotoS3
 
 /// S3 Transfer manager. Transfers files/folders back and forth between S3 and your local file system
 public struct S3TransferManager {
-    enum Error: Swift.Error {
+    // Configuration for S3 Transfer Manager
+    public struct Configuration {
+        // size file has to be before using multipart upload
+        let multipartThreshold: Int
+        // size of each multipart part upload
+        let multipartPartSize: Int
+        
+        public init(
+            multipartThreshold: Int = 8 * 1024 * 1024,
+            multipartPartSize: Int = 8 * 1024 * 1024
+        ) {
+            precondition(multipartThreshold >= 5 * 1024 * 1024, "Multipart upload threshold is required to be greater than 5MB")
+            precondition(multipartThreshold >= multipartPartSize, "Multipart upload threshold is required to be greater than the multipart part size")
+            self.multipartThreshold = multipartThreshold
+            self.multipartPartSize = multipartPartSize
+        }
+    }
+
+    public enum Error: Swift.Error {
         case failedToCreateFolder(String)
     }
 
-    let fileIO: NonBlockingFileIO
     let s3: S3
     let threadPoolProvider: S3.ThreadPoolProvider
     let threadPool: NIOThreadPool
+    let fileIO: NonBlockingFileIO
+    let configuration: Configuration
     let logger: Logger
 
     /// Initialize S3 Transfer manager.
     /// - Parameters:
     ///   - s3: S3 service object from Soto
     ///   - threadPoolProvider: Thread pool provider for file operations, Either create a new pool, or supply you have already
+    ///   - configuration: transfer manager configuration
     ///   - logger: Logger
-    public init(s3: S3, threadPoolProvider: S3.ThreadPoolProvider, logger: Logger = AWSClient.loggingDisabled) {
+    public init(
+        s3: S3,
+        threadPoolProvider: S3.ThreadPoolProvider,
+        configuration: Configuration = Configuration(),
+        logger: Logger = AWSClient.loggingDisabled
+    ) {
         self.s3 = s3
         self.threadPoolProvider = threadPoolProvider
 
@@ -46,6 +71,7 @@ public struct S3TransferManager {
             self.threadPool = sharedPool
         }
         self.fileIO = NonBlockingFileIO(threadPool: self.threadPool)
+        self.configuration = configuration
         self.logger = logger
     }
 
@@ -68,11 +94,28 @@ public struct S3TransferManager {
         return self.fileIO.openFile(path: from, eventLoop: eventLoop)
             .flatMap { fileHandle, fileRegion in
                 let fileSize = fileRegion.readableBytes
-                let payload: AWSPayload = .fileHandle(fileHandle, offset: 0, size: fileSize, fileIO: self.fileIO) { downloaded in
-                    try progress(Double(downloaded) / Double(fileSize))
+                // if file size is greater than multipart threshold then use multipart upload for uploading the file
+                if fileSize > self.configuration.multipartThreshold {
+                    let request = S3.CreateMultipartUploadRequest(bucket: to.bucket, key: to.path)
+                    return s3.multipartUpload(
+                        request,
+                        partSize: self.configuration.multipartPartSize,
+                        fileHandle: fileHandle,
+                        fileIO: self.fileIO,
+                        uploadSize: fileSize,
+                        abortOnFail: true,
+                        on: eventLoop,
+                        progress: progress
+                    )
+                    .map { _ in }
+                    .closeFileHandle(fileHandle)
+                } else {
+                    let payload: AWSPayload = .fileHandle(fileHandle, offset: 0, size: fileSize, fileIO: self.fileIO) { downloaded in
+                        try progress(Double(downloaded) / Double(fileSize))
+                    }
+                    let request = S3.PutObjectRequest(body: payload, bucket: to.bucket, key: to.path)
+                    return self.s3.putObject(request, on: eventLoop).map { _ in }.closeFileHandle(fileHandle)
                 }
-                let request = S3.PutObjectRequest(body: payload, bucket: to.bucket, key: to.path)
-                return self.s3.putObject(request, on: eventLoop).map { _ in }.closeFileHandle(fileHandle)
             }
     }
 
