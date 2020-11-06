@@ -39,6 +39,7 @@ public struct S3TransferManager {
 
     public enum Error: Swift.Error {
         case failedToCreateFolder(String)
+        case failedToEnumerateFolder(String)
     }
 
     let s3: S3
@@ -375,7 +376,7 @@ extension S3TransferManager {
                 includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey],
                 options: .skipsHiddenFiles
             ) else {
-                return files
+                throw Error.failedToEnumerateFolder(folder)
             }
             while let file = fileEnumerator.nextObject() as? URL {
                 let path = file.path
