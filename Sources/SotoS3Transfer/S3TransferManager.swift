@@ -98,7 +98,7 @@ public struct S3TransferManager {
                 // if file size is greater than multipart threshold then use multipart upload for uploading the file
                 if fileSize > self.configuration.multipartThreshold {
                     let request = S3.CreateMultipartUploadRequest(bucket: to.bucket, key: to.path)
-                    return s3.multipartUpload(
+                    return self.s3.multipartUpload(
                         request,
                         partSize: self.configuration.multipartPartSize,
                         fileHandle: fileHandle,
