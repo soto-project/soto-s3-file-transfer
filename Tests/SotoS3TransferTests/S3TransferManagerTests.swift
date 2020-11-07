@@ -166,8 +166,18 @@ final class TransferManagerTests: XCTestCase {
 
     func testSyncPathLocalToS3() {
         XCTAssertNoThrow(try Self.s3Transfer.sync(from: self.rootPath + "/Tests", to: S3Folder(bucket: Self.bucketName, path: "testSyncPathLocalToS3"), delete: true).wait())
-        XCTAssertNoThrow(try Self.s3Transfer.sync(from: S3Folder(bucket: Self.bucketName, path: "testSyncPathLocalToS3"), to: self.rootPath + "/Tests2", delete: true).wait())
         XCTAssertNoThrow(try Self.s3Transfer.sync(from: S3Folder(bucket: Self.bucketName, path: "testSyncPathLocalToS3"), to: S3Folder(bucket: Self.bucketName, path: "testSyncPathLocalToS3_v2"), delete: true).wait())
+        XCTAssertNoThrow(try Self.s3Transfer.sync(from: S3Folder(bucket: Self.bucketName, path: "testSyncPathLocalToS3_v2"), to: self.rootPath + "/Tests2", delete: true).wait())
+
+        var files: [S3TransferManager.FileDescriptor]?
+        XCTAssertNoThrow(files = try Self.s3Transfer.listFiles(in: self.rootPath + "/Tests2").wait())
+        XCTAssertNotNil(files?.first(where: { $0.name == "\(self.rootPath)/Tests2/SotoS3TransferTests/S3PathTests.swift" }))
+
+        if let files = files {
+            for file in files {
+                XCTAssertNoThrow(try FileManager.default.removeItem(atPath: file.name))
+            }
+        }
     }
 
     func testDeleteFolder() {
