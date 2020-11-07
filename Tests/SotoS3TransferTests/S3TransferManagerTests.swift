@@ -55,7 +55,7 @@ final class TransferManagerTests: XCTestCase {
         XCTAssertNoThrow(try buffer.write(to: URL(fileURLWithPath: filename)))
         defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename)) }
 
-        XCTAssertNoThrow(try Self.s3Transfer.copy(from: filename, to: S3File(bucket: Self.bucketName, path: "testFile")) { print($0) }.wait())
+        XCTAssertNoThrow(try Self.s3Transfer.copy(from: filename, to: S3File(bucket: Self.bucketName, path: "testFile"), options: .init(metadata: ["test": "1,2,3"])) { print($0) }.wait())
         XCTAssertNoThrow(try Self.s3Transfer.copy(from: S3File(bucket: Self.bucketName, path: "testFile"), to: filename2) { print($0) }.wait())
 
         defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename2)) }
