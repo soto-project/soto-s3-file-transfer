@@ -171,7 +171,7 @@ public struct S3TransferManager {
     ///   - to: destination S3 file
     ///   - progress: progress function, updated with value from 0 to 1 based on how much we have uploaded
     /// - Returns: EventLoopFuture fulfilled when operation is complete
-    public func copy(from: S3File, to: S3File, options: CopyOptions = .init(), progress: @escaping (Double) throws -> Void = { _ in }) -> EventLoopFuture<Void> {
+    public func copy(from: S3File, to: S3File, options: CopyOptions = .init()) -> EventLoopFuture<Void> {
         self.logger.info("Copy from: \(from) to \(to)")
         let request = S3.CopyObjectRequest(bucket: to.bucket, copySource: "/\(from.bucket)/\(from.path)", key: to.path, options: options)
         return self.s3.copyObject(request)

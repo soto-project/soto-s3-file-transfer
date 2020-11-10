@@ -90,7 +90,7 @@ final class TransferManagerTests: XCTestCase {
         defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename)) }
 
         XCTAssertNoThrow(try Self.s3Transfer.copy(from: filename, to: S3File(bucket: Self.bucketName, path: "testFile")) { print($0) }.wait())
-        XCTAssertNoThrow(try Self.s3Transfer.copy(from: S3File(bucket: Self.bucketName, path: "testFile"), to: S3File(bucket: Self.bucketName, path: "testFile2")) { print($0) }.wait())
+        XCTAssertNoThrow(try Self.s3Transfer.copy(from: S3File(bucket: Self.bucketName, path: "testFile"), to: S3File(bucket: Self.bucketName, path: "testFile2")).wait())
         XCTAssertNoThrow(try Self.s3Transfer.copy(from: S3File(bucket: Self.bucketName, path: "testFile2"), to: filename2) { print($0) }.wait())
 
         defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename2)) }
