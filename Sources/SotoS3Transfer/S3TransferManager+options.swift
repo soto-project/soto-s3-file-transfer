@@ -202,7 +202,7 @@ extension S3.CreateMultipartUploadRequest {
 }
 
 extension S3.CopyObjectRequest {
-    init(bucket: String, copySource: String, key: String, options: S3TransferManager.PutOptions) {
+    init(bucket: String, copySource: String, key: String, options: S3TransferManager.CopyOptions) {
         self.init(
             acl: options.acl,
             bucket: bucket,
