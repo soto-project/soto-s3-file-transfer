@@ -189,7 +189,7 @@ public struct S3TransferManager {
             .flatMap { files in
                 let transfers = Self.targetFiles(files: files, from: folder, to: s3Folder)
                 let transferFutures: [EventLoopFuture<Void>] = transfers.map { self.copy(from: $0.from.name, to: $0.to, options: options) }
-                return EventLoopFuture.andAllComplete(transferFutures, on: eventLoop).map { _ in }
+                return EventLoopFuture.andAllSucceed(transferFutures, on: eventLoop)
             }
     }
 
@@ -204,7 +204,7 @@ public struct S3TransferManager {
             .flatMap { files in
                 let transfers = Self.targetFiles(files: files, from: s3Folder, to: folder)
                 let transferFutures: [EventLoopFuture<Void>] = transfers.map { self.copy(from: $0.from.file, to: $0.to, options: options) }
-                return EventLoopFuture.andAllComplete(transferFutures, on: eventLoop).map { _ in }
+                return EventLoopFuture.andAllSucceed(transferFutures, on: eventLoop)
             }
     }
 
@@ -219,7 +219,7 @@ public struct S3TransferManager {
             .flatMap { files in
                 let transfers = Self.targetFiles(files: files, from: srcFolder, to: destFolder)
                 let transferFutures: [EventLoopFuture<Void>] = transfers.map { self.copy(from: $0.from.file, to: $0.to, options: options) }
-                return EventLoopFuture.andAllComplete(transferFutures, on: eventLoop).map { _ in }
+                return EventLoopFuture.andAllSucceed(transferFutures, on: eventLoop)
             }
     }
 
@@ -257,7 +257,7 @@ public struct S3TransferManager {
                     }
                     deleteFutures = deletions.map { self.delete($0) }
                 }
-                return EventLoopFuture.whenAllSucceed(transferFutures + deleteFutures, on: eventLoop).map { _ in }
+                return EventLoopFuture.andAllSucceed(transferFutures + deleteFutures, on: eventLoop)
             }
     }
 
@@ -295,7 +295,7 @@ public struct S3TransferManager {
                     }
                     deleteFutures = deletions.map { self.delete($0) }
                 }
-                return EventLoopFuture.whenAllSucceed(transferFutures + deleteFutures, on: eventLoop).map { _ in }
+                return EventLoopFuture.andAllSucceed(transferFutures + deleteFutures, on: eventLoop)
             }
     }
 
@@ -333,7 +333,7 @@ public struct S3TransferManager {
                     }
                     deleteFutures = deletions.map { self.delete($0) }
                 }
-                return EventLoopFuture.whenAllSucceed(transferFutures + deleteFutures, on: eventLoop).map { _ in }
+                return EventLoopFuture.andAllSucceed(transferFutures + deleteFutures, on: eventLoop)
             }
     }
 
@@ -349,7 +349,7 @@ public struct S3TransferManager {
         return listFiles(in: s3Folder)
             .flatMap { files in
                 let deleteFutures = files.map { self.delete($0.file) }
-                return EventLoopFuture.whenAllSucceed(deleteFutures, on: eventLoop).map { _ in }
+                return EventLoopFuture.andAllSucceed(deleteFutures, on: eventLoop)
             }
     }
 }
