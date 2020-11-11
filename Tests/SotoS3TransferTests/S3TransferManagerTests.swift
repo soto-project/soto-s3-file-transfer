@@ -24,7 +24,7 @@ final class TransferManagerTests: XCTestCase {
 
     override class func setUp() {
         self.client = AWSClient(httpClientProvider: .createNew)
-        self.s3 = S3(client: self.client, region: .euwest1) // .with(middlewares: [AWSLoggingMiddleware()])
+        self.s3 = S3(client: self.client, region: .euwest1).with(middlewares: [AWSLoggingMiddleware()])
         self.s3Transfer = .init(s3: self.s3, threadPoolProvider: .createNew, logger: Logger(label: "S3TransferTests"))
 
         XCTAssertNoThrow(try self.s3.createBucket(.init(bucket: self.bucketName)).wait())
@@ -33,17 +33,19 @@ final class TransferManagerTests: XCTestCase {
     override class func tearDown() {
         // delete contents of bucket and then the bucket
         let request = S3.ListObjectsV2Request(bucket: self.bucketName)
-        let response = self.s3.listObjectsV2(request)
-            .flatMap { response -> EventLoopFuture<Void> in
-                let eventLoop = s3.client.eventLoopGroup.next()
-                guard let objects = response.contents else { return eventLoop.makeSucceededFuture(()) }
-                let deleteFutureResults = objects.compactMap { $0.key.map { s3.deleteObject(.init(bucket: bucketName, key: $0)) } }
-                return EventLoopFuture.andAllSucceed(deleteFutureResults, on: eventLoop)
-            }
-            .flatMap { _ -> EventLoopFuture<Void> in
-                let request = S3.DeleteBucketRequest(bucket: bucketName)
-                return s3.deleteBucket(request).map { _ in }
-            }
+        let response = self.s3.listObjectsV2Paginator(request, []) { result, response, eventLoop in
+            let newResult: [S3.Object] = result + (response.contents ?? [])
+            return eventLoop.makeSucceededFuture((true, newResult))
+        }
+        .flatMap { (objects: [S3.Object]) -> EventLoopFuture<Void> in
+            let eventLoop = s3.client.eventLoopGroup.next()
+            let deleteFutureResults = objects.compactMap { $0.key.map { s3.deleteObject(.init(bucket: bucketName, key: $0)) } }
+            return EventLoopFuture.andAllSucceed(deleteFutureResults, on: eventLoop)
+        }
+        .flatMap { _ -> EventLoopFuture<Void> in
+            let request = S3.DeleteBucketRequest(bucket: bucketName)
+            return s3.deleteBucket(request).map { _ in }
+        }
         XCTAssertNoThrow(try response.wait())
         XCTAssertNoThrow(try self.client.syncShutdown())
     }
@@ -148,10 +150,10 @@ final class TransferManagerTests: XCTestCase {
 
     func testCopyPathLocalToS3() {
         let folder = S3Folder(bucket: Self.bucketName, path: "testCopyPathLocalToS3")
-        XCTAssertNoThrow(try Self.s3Transfer.copy(from: self.rootPath + "/Sources", to: folder).wait())
+        XCTAssertNoThrow(try Self.s3Transfer.copy(from: self.rootPath, to: folder).wait())
         var files: [S3TransferManager.S3FileDescriptor]?
         XCTAssertNoThrow(files = try Self.s3Transfer.listFiles(in: folder).wait())
-        XCTAssertNotNil(files?.first(where: { $0.file.path == "testCopyPathLocalToS3/SotoS3Transfer/S3Path.swift" }))
+        XCTAssertNotNil(files?.first(where: { $0.file.path == "testCopyPathLocalToS3/Sources/SotoS3Transfer/S3Path.swift" }))
     }
 
     func testS3toS3CopyPath() {
@@ -191,6 +193,11 @@ final class TransferManagerTests: XCTestCase {
         XCTAssertEqual(files?.count, 0)
     }
 
+    func testBigFolderUpload() {
+        let folder = S3Folder(bucket: Self.bucketName, path: "testBigFolderUpload")
+        XCTAssertNoThrow(try Self.s3Transfer.copy(from: "\(self.rootPath)/.build/checkouts/soto/Sources/Soto/Services" , to: folder).wait())
+    }
+    
     var rootPath: String {
         return #file
             .split(separator: "/", omittingEmptySubsequences: false)
