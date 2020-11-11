@@ -4,7 +4,7 @@ Make uploading and downloading of files to AWS S3 easy.
 
 ## Setup
 
-Soto S3 Transfer uses the Soto Swift SDK for AWS. You need to create a Soto service object before you can use the S3 transfer manager. See Soto [documentation](https://github.com/soto-project/soto) for more guidance. You also need to supply the `threadPoolProvider` parameter which indicates where Soto S3 Transfer will get threads from to run the file loading and saving. 
+Soto S3 Transfer uses the Soto Swift SDK for AWS. You need to create a Soto S3 service object before you can use the S3 transfer manager. See Soto [documentation](https://github.com/soto-project/soto) for more guidance. You also need to supply the `threadPoolProvider` parameter which indicates where Soto S3 Transfer will get threads from to run the file loading and saving. 
 
 ```swift
 let client = AWSClient(httpClientProvider: .createNew)
