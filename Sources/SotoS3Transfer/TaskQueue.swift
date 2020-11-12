@@ -14,6 +14,8 @@
 
 import NIO
 
+/// Manage a queue of tasks, ensuring only so many tasks are running concurrently. Based off code posted by
+/// Cory Benfield on Vapor Discord. https://discord.com/channels/431917998102675485/448584561845338139/766320821206908959
 class TaskQueue<Value> {
     struct PendingTask<Value> {
         let task: () -> EventLoopFuture<Value>
