@@ -109,6 +109,7 @@ public struct S3TransferManager {
                         fileIO: self.fileIO,
                         uploadSize: fileSize,
                         abortOnFail: true,
+                        logger: logger,
                         on: eventLoop,
                         progress: progress
                     )
@@ -119,7 +120,7 @@ public struct S3TransferManager {
                         try progress(Double(downloaded) / Double(fileSize))
                     }
                     let request = S3.PutObjectRequest(body: payload, bucket: to.bucket, key: to.path, options: options)
-                    return self.s3.putObject(request, on: eventLoop).map { _ in }.closeFileHandle(fileHandle)
+                    return self.s3.putObject(request, logger: logger, on: eventLoop).map { _ in }.closeFileHandle(fileHandle)
                 }
             }
     }
@@ -153,11 +154,11 @@ public struct S3TransferManager {
             self.fileIO.openFile(path: to, mode: .write, flags: .allowFileCreation(), eventLoop: eventLoop)
         }.flatMap { fileHandle -> EventLoopFuture<S3.GetObjectOutput> in
             // get filesize so we can calculate progress
-            return self.s3.headObject(.init(bucket: from.bucket, key: from.path))
+            return self.s3.headObject(.init(bucket: from.bucket, key: from.path), logger: logger, on: eventLoop)
                 .flatMap { response in
                     let fileSize = response.contentLength ?? 1
                     let request = S3.GetObjectRequest(bucket: from.bucket, key: from.path, options: options)
-                    return self.s3.getObjectStreaming(request, on: eventLoop) { byteBuffer, eventLoop in
+                    return self.s3.getObjectStreaming(request, logger: logger, on: eventLoop) { byteBuffer, eventLoop in
                         let bufferSize = byteBuffer.readableBytes
                         return self.fileIO.write(fileHandle: fileHandle, buffer: byteBuffer, eventLoop: eventLoop).flatMapThrowing { _ in
                             bytesDownloaded += bufferSize
@@ -179,7 +180,7 @@ public struct S3TransferManager {
         self.logger.info("Copy from: \(from) to \(to)")
         let copySource = "/\(from.bucket)/\(from.path)".addingPercentEncoding(withAllowedCharacters: Self.pathAllowedCharacters)!
         let request = S3.CopyObjectRequest(bucket: to.bucket, copySource: copySource, key: to.path, options: options)
-        return self.s3.copyObject(request)
+        return self.s3.copyObject(request, logger: logger)
             .map { _ in }
     }
 
@@ -363,7 +364,7 @@ public struct S3TransferManager {
     /// delete a file on S3
     public func delete(_ s3File: S3File) -> EventLoopFuture<Void> {
         self.logger.info("Deleting \(s3File)")
-        return self.s3.deleteObject(.init(bucket: s3File.bucket, key: s3File.path)).map { _ in }
+        return self.s3.deleteObject(.init(bucket: s3File.bucket, key: s3File.path), logger: logger).map { _ in }
     }
 
     /// delete a folder on S3
@@ -420,7 +421,7 @@ extension S3TransferManager {
     /// List files in S3 folder
     func listFiles(in folder: S3Folder) -> EventLoopFuture<[S3FileDescriptor]> {
         let request = S3.ListObjectsV2Request(bucket: folder.bucket, prefix: folder.path)
-        return self.s3.listObjectsV2Paginator(request, []) { accumulator, response, eventLoop in
+        return self.s3.listObjectsV2Paginator(request, [], logger: logger) { accumulator, response, eventLoop in
             let files: [S3FileDescriptor] = response.contents?.compactMap {
                 guard let key = $0.key,
                     let lastModified = $0.lastModified else { return nil }
