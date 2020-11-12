@@ -24,7 +24,7 @@ final class TransferManagerTests: XCTestCase {
 
     override class func setUp() {
         self.client = AWSClient(httpClientProvider: .createNew)
-        self.s3 = S3(client: self.client, region: .euwest1).with(middlewares: [AWSLoggingMiddleware()])
+        self.s3 = S3(client: self.client, region: .euwest1)//.with(middlewares: [AWSLoggingMiddleware()])
         self.s3Transfer = .init(s3: self.s3, threadPoolProvider: .createNew, logger: Logger(label: "S3TransferTests"))
 
         XCTAssertNoThrow(try self.s3.createBucket(.init(bucket: self.bucketName)).wait())
@@ -195,7 +195,7 @@ final class TransferManagerTests: XCTestCase {
 
     func testBigFolderUpload() {
         let folder = S3Folder(bucket: Self.bucketName, path: "testBigFolderUpload")
-        XCTAssertNoThrow(try Self.s3Transfer.copy(from: "\(self.rootPath)/.build/checkouts/soto/Sources/Soto/Services" , to: folder).wait())
+        XCTAssertNoThrow(try Self.s3Transfer.sync(from: "\(self.rootPath)/.build/checkouts/soto/Sources/Soto/Services" , to: folder, delete: true).wait())
     }
     
     var rootPath: String {
