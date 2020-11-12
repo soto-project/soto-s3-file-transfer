@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        tag: ['5.1', '5.2', '5.3']
+        tag: ['5.3']
     container:
       image: swift:${{ matrix.tag }}
     steps:
