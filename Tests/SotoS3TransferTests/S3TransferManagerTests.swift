@@ -39,7 +39,8 @@ final class TransferManagerTests: XCTestCase {
         }
         .flatMap { (objects: [S3.Object]) -> EventLoopFuture<Void> in
             let eventLoop = s3.client.eventLoopGroup.next()
-            let deleteFutureResults = objects.compactMap { $0.key.map { s3.deleteObject(.init(bucket: bucketName, key: $0)) } }
+            let taskQueue = TaskQueue<S3.DeleteObjectOutput>(maxConcurrentTasks: 8, on: eventLoop)
+            let deleteFutureResults = objects.compactMap { $0.key.map { key in taskQueue.submitTask { s3.deleteObject(.init(bucket: bucketName, key: key)) } } }
             return EventLoopFuture.andAllSucceed(deleteFutureResults, on: eventLoop)
         }
         .flatMap { _ -> EventLoopFuture<Void> in
@@ -102,6 +103,24 @@ final class TransferManagerTests: XCTestCase {
         XCTAssertEqual(buffer, buffer2)
     }
 
+    func testS3MultipartCopy() {
+        let filename = "\(rootPath)/\(#function)"
+        let filename2 = "\(rootPath)/\(#function)2"
+        let buffer = self.createRandomBuffer(size: 10_202_400)
+        XCTAssertNoThrow(try buffer.write(to: URL(fileURLWithPath: filename)))
+        defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename)) }
+
+        XCTAssertNoThrow(try Self.s3Transfer.copy(from: filename, to: S3File(bucket: Self.bucketName, path: "testS3MultipartCopy")) { print($0) }.wait())
+        XCTAssertNoThrow(try Self.s3Transfer.copy(from: S3File(bucket: Self.bucketName, path: "testS3MultipartCopy"), to: S3File(bucket: Self.bucketName, path: "testS3MultipartCopy_Copy")).wait())
+        XCTAssertNoThrow(try Self.s3Transfer.copy(from: S3File(bucket: Self.bucketName, path: "testS3MultipartCopy_Copy"), to: filename2) { print($0) }.wait())
+
+        defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename2)) }
+
+        var buffer2: Data?
+        XCTAssertNoThrow(try buffer2 = Data(contentsOf: URL(fileURLWithPath: filename2)))
+        XCTAssertEqual(buffer, buffer2)
+    }
+
     func testListFiles() {
         var files: [S3TransferManager.FileDescriptor]?
         XCTAssertNoThrow(files = try Self.s3Transfer.listFiles(in: self.rootPath).wait())
@@ -136,8 +155,8 @@ final class TransferManagerTests: XCTestCase {
 
     func testS3TargetFiles() {
         let s3Files: [S3TransferManager.S3FileDescriptor] = [
-            .init(file: S3File(url: "s3://my-bucket/User/JohnSmith/Documents/test.doc")!, modificationDate: Date()),
-            .init(file: S3File(url: "s3://my-bucket/User/JohnSmith/Documents/hello.doc")!, modificationDate: Date())
+            .init(file: S3File(url: "s3://my-bucket/User/JohnSmith/Documents/test.doc")!, modificationDate: Date(), size: 1024),
+            .init(file: S3File(url: "s3://my-bucket/User/JohnSmith/Documents/hello.doc")!, modificationDate: Date(), size: 2000)
         ]
         let files = S3TransferManager.targetFiles(files: s3Files, from: S3Folder(url: "s3://my-bucket")!, to: "/User/JohnSmith/Downloads")
         XCTAssertEqual(files[0].to, "/User/JohnSmith/Downloads/User/JohnSmith/Documents/test.doc")
@@ -195,7 +214,9 @@ final class TransferManagerTests: XCTestCase {
 
     func testBigFolderUpload() {
         let folder = S3Folder(bucket: Self.bucketName, path: "testBigFolderUpload")
+        let folder2 = S3Folder(bucket: Self.bucketName, path: "testBigFolderUpload_Copy")
         XCTAssertNoThrow(try Self.s3Transfer.sync(from: "\(self.rootPath)/.build/checkouts/soto/Sources/Soto/Services" , to: folder, delete: true).wait())
+        XCTAssertNoThrow(try Self.s3Transfer.sync(from: folder , to: folder2, delete: true).wait())
     }
     
     var rootPath: String {
