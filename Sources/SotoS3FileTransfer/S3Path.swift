@@ -17,19 +17,19 @@ public protocol S3Path: Equatable, CustomStringConvertible {
     /// s3 bucket name
     var bucket: String { get }
     /// path inside s3 bucket. Without leading forward slash
-    var path: String { get }
+    var key: String { get }
 }
 
 public extension S3Path {
     /// return in URL form `s3://<bucketname>/<path>`
-    var url: String { return "s3://\(bucket)/\(path)" }
+    var url: String { return "s3://\(bucket)/\(key)" }
 
     /// return parent folder
     func parent() -> S3Folder? {
-        let path = self.path.removingSuffix("/")
+        let path = self.key.removingSuffix("/")
         guard path.count > 0 else { return nil }
-        guard let slash: String.Index = path.lastIndex(of: "/") else { return S3Folder(bucket: bucket, path: "") }
-        return S3Folder(bucket: bucket, path: String(path[path.startIndex...slash]))
+        guard let slash: String.Index = path.lastIndex(of: "/") else { return S3Folder(bucket: bucket, key: "") }
+        return S3Folder(bucket: bucket, key: String(path[path.startIndex...slash]))
     }
 
     /// CustomStringConvertible protocol requirement
@@ -41,27 +41,27 @@ public struct S3File: S3Path {
     /// s3 bucket name
     public let bucket: String
     /// path inside s3 bucket
-    public let path: String
+    public let key: String
 
-    internal init(bucket: String, path: String) {
+    internal init(bucket: String, key: String) {
         self.bucket = bucket
-        self.path = path.removingPrefix("/")
+        self.key = key.removingPrefix("/")
     }
 
     /// initialiizer
-    /// - Parameter url: Construct file descriptor from url of form `s3://<bucketname>/<path>`
+    /// - Parameter url: Construct file descriptor from url of form `s3://<bucketname>/<key>`
     public init?(url: String) {
         guard url.hasPrefix("s3://") || url.hasPrefix("S3://") else { return nil }
         guard !url.hasSuffix("/") else { return nil }
         let path = url.dropFirst(5)
         guard let slash = path.firstIndex(of: "/") else { return nil }
-        self.init(bucket: String(path[path.startIndex..<slash]), path: String(path[slash..<path.endIndex]))
+        self.init(bucket: String(path[path.startIndex..<slash]), key: String(path[slash..<path.endIndex]))
     }
 
     /// file name without path
     public var name: String {
-        guard let slash = path.lastIndex(of: "/") else { return self.path }
-        return String(self.path[self.path.index(after: slash)..<self.path.endIndex])
+        guard let slash = key.lastIndex(of: "/") else { return self.key }
+        return String(self.key[self.key.index(after: slash)..<self.key.endIndex])
     }
 
     /// file name without path or extension
@@ -84,29 +84,29 @@ public struct S3Folder: S3Path {
     /// s3 bucket name
     public let bucket: String
     /// path inside s3 bucket
-    public let path: String
+    public let key: String
 
-    internal init(bucket: String, path: String) {
+    internal init(bucket: String, key: String) {
         self.bucket = bucket
-        self.path = path.appendingSuffixIfNeeded("/").removingPrefix("/")
+        self.key = key.appendingSuffixIfNeeded("/").removingPrefix("/")
     }
 
     /// initialiizer
-    /// - Parameter url: Construct folder descriptor from url of form `s3://<bucketname>/<path>`
+    /// - Parameter url: Construct folder descriptor from url of form `s3://<bucketname>/<key>`
     public init?(url: String) {
         guard url.hasPrefix("s3://") || url.hasPrefix("S3://") else { return nil }
         let path = String(url.dropFirst(5))
         if let slash = path.firstIndex(of: "/") {
-            self.init(bucket: String(path[path.startIndex..<slash]), path: String(path[slash..<path.endIndex]))
+            self.init(bucket: String(path[path.startIndex..<slash]), key: String(path[slash..<path.endIndex]))
         } else {
-            self.init(bucket: path, path: "")
+            self.init(bucket: path, key: "")
         }
     }
 
     /// Return sub folder of folder
     /// - Parameter name: sub folder name
     public func subFolder(_ name: String) -> S3Folder {
-        S3Folder(bucket: self.bucket, path: "\(self.path)\(name)")
+        S3Folder(bucket: self.bucket, key: "\(self.key)\(name)")
     }
 
     /// Return file inside folder
@@ -115,7 +115,7 @@ public struct S3Folder: S3Path {
         guard name.firstIndex(of: "/") == nil else {
             preconditionFailure("Filename \(name) cannot include '/'")
         }
-        return S3File(bucket: self.bucket, path: "\(self.path)\(name)")
+        return S3File(bucket: self.bucket, key: "\(self.key)\(name)")
     }
 }
 

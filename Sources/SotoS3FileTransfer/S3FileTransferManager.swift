@@ -111,7 +111,7 @@ public struct S3FileTransferManager {
                 let fileSize = fileRegion.readableBytes
                 // if file size is greater than multipart threshold then use multipart upload for uploading the file
                 if fileSize > self.configuration.multipartThreshold {
-                    let request = S3.CreateMultipartUploadRequest(bucket: to.bucket, key: to.path, options: options)
+                    let request = S3.CreateMultipartUploadRequest(bucket: to.bucket, key: to.key, options: options)
                     return self.s3.multipartUpload(
                         request,
                         partSize: self.configuration.multipartPartSize,
@@ -129,7 +129,7 @@ public struct S3FileTransferManager {
                     let payload: AWSPayload = .fileHandle(fileHandle, offset: 0, size: fileSize, fileIO: self.fileIO) { downloaded in
                         try progress(Double(downloaded) / Double(fileSize))
                     }
-                    let request = S3.PutObjectRequest(body: payload, bucket: to.bucket, key: to.path, options: options)
+                    let request = S3.PutObjectRequest(body: payload, bucket: to.bucket, key: to.key, options: options)
                     return self.s3.putObject(request, logger: logger, on: eventLoop).map { _ in }.closeFileHandle(fileHandle)
                 }
             }
@@ -151,11 +151,11 @@ public struct S3FileTransferManager {
             // if `to` is a folder append name of object to end of `to` string to place object in folder `to`.
             var isDirectory: ObjCBool = false
             if FileManager.default.fileExists(atPath: to, isDirectory: &isDirectory), isDirectory.boolValue == true {
-                if var lastSlash = from.path.lastIndex(of: "/") {
-                    lastSlash = from.path.index(after: lastSlash)
-                    to = "\(to)/\(from.path[lastSlash...])"
+                if var lastSlash = from.key.lastIndex(of: "/") {
+                    lastSlash = from.key.index(after: lastSlash)
+                    to = "\(to)/\(from.key[lastSlash...])"
                 } else {
-                    to = "\(to)/\(from.path)"
+                    to = "\(to)/\(from.key)"
                 }
             } else {
                 // create folder to place file in, if it doesn't exist already
@@ -177,10 +177,10 @@ public struct S3FileTransferManager {
             self.fileIO.openFile(path: filename, mode: .write, flags: .allowFileCreation(), eventLoop: eventLoop)
         }.flatMap { fileHandle -> EventLoopFuture<S3.GetObjectOutput> in
             // get filesize so we can calculate progress
-            return self.s3.headObject(.init(bucket: from.bucket, key: from.path), logger: logger, on: eventLoop)
+            return self.s3.headObject(.init(bucket: from.bucket, key: from.key), logger: logger, on: eventLoop)
                 .flatMap { response in
                     let fileSize = response.contentLength ?? 1
-                    let request = S3.GetObjectRequest(bucket: from.bucket, key: from.path, options: options)
+                    let request = S3.GetObjectRequest(bucket: from.bucket, key: from.key, options: options)
                     return self.s3.getObjectStreaming(request, logger: logger, on: eventLoop) { byteBuffer, eventLoop in
                         let bufferSize = byteBuffer.readableBytes
                         return self.fileIO.write(fileHandle: fileHandle, buffer: byteBuffer, eventLoop: eventLoop).flatMapThrowing { _ in
@@ -203,14 +203,14 @@ public struct S3FileTransferManager {
     public func copy(from: S3File, to: S3File, fileSize: Int? = nil, options: CopyOptions = .init()) -> EventLoopFuture<Void> {
         self.logger.info("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
-        let copySource = "/\(from.bucket)/\(from.path)".addingPercentEncoding(withAllowedCharacters: Self.pathAllowedCharacters)!
-        let request = S3.CopyObjectRequest(bucket: to.bucket, copySource: copySource, key: to.path, options: options)
+        let copySource = "/\(from.bucket)/\(from.key)".addingPercentEncoding(withAllowedCharacters: Self.pathAllowedCharacters)!
+        let request = S3.CopyObjectRequest(bucket: to.bucket, copySource: copySource, key: to.key, options: options)
 
         let fileSizeFuture: EventLoopFuture<Int>
         if let fileSize = fileSize {
             fileSizeFuture = eventLoop.makeSucceededFuture(fileSize)
         } else {
-            let headRequest = S3.HeadObjectRequest(bucket: from.bucket, key: from.path)
+            let headRequest = S3.HeadObjectRequest(bucket: from.bucket, key: from.key)
             fileSizeFuture = self.s3.headObject(headRequest, on: eventLoop).map { response in Int(response.contentLength!) }
         }
         return fileSizeFuture.flatMap { fileSize -> EventLoopFuture<Void> in
@@ -295,7 +295,7 @@ public struct S3FileTransferManager {
                 let targetFiles = Self.targetFiles(files: files, from: folder, to: s3Folder)
                 let transfers = targetFiles.compactMap { transfer -> (from: FileDescriptor, to: S3File)? in
                     // does file exist on S3
-                    guard let s3File = s3Files.first(where: { $0.file.path == transfer.to.path }) else { return transfer }
+                    guard let s3File = s3Files.first(where: { $0.file.key == transfer.to.key }) else { return transfer }
                     // does file on S3 have a later date
                     guard s3File.modificationDate > transfer.from.modificationDate else { return transfer }
                     return nil
@@ -306,7 +306,7 @@ public struct S3FileTransferManager {
                 // construct list of files to delete, if we are doing deletion
                 if delete == true {
                     let deletions = s3Files.compactMap { s3File -> S3File? in
-                        if targetFiles.first(where: { $0.to.path == s3File.file.path }) == nil {
+                        if targetFiles.first(where: { $0.to.key == s3File.file.key }) == nil {
                             return s3File.file
                         } else {
                             return nil
@@ -375,7 +375,7 @@ public struct S3FileTransferManager {
                 let targetFiles = Self.targetFiles(files: srcFiles, from: srcFolder, to: destFolder)
                 let transfers = targetFiles.compactMap { transfer -> (from: S3FileDescriptor, to: S3File)? in
                     // does file exist in destination folder
-                    guard let file = destFiles.first(where: { $0.file.path == transfer.to.path }) else { return transfer }
+                    guard let file = destFiles.first(where: { $0.file.key == transfer.to.key }) else { return transfer }
                     // does local file have a later date
                     guard file.modificationDate > transfer.from.modificationDate else { return transfer }
                     return nil
@@ -386,7 +386,7 @@ public struct S3FileTransferManager {
                 // construct list of files to delete, if we are doing deletion
                 if delete == true {
                     let deletions = destFiles.compactMap { file -> S3File? in
-                        if targetFiles.first(where: { $0.to.path == file.file.path }) == nil {
+                        if targetFiles.first(where: { $0.to.key == file.file.key }) == nil {
                             return file.file
                         } else {
                             return nil
@@ -401,7 +401,7 @@ public struct S3FileTransferManager {
     /// delete a file on S3
     public func delete(_ s3File: S3File) -> EventLoopFuture<Void> {
         self.logger.info("Deleting \(s3File)")
-        return self.s3.deleteObject(.init(bucket: s3File.bucket, key: s3File.path), logger: self.logger).map { _ in }
+        return self.s3.deleteObject(.init(bucket: s3File.bucket, key: s3File.key), logger: self.logger).map { _ in }
     }
 
     /// delete a folder on S3
@@ -470,14 +470,14 @@ extension S3FileTransferManager {
 
     /// List files in S3 folder
     func listFiles(in folder: S3Folder) -> EventLoopFuture<[S3FileDescriptor]> {
-        let request = S3.ListObjectsV2Request(bucket: folder.bucket, prefix: folder.path)
+        let request = S3.ListObjectsV2Request(bucket: folder.bucket, prefix: folder.key)
         return self.s3.listObjectsV2Paginator(request, [], logger: self.logger) { accumulator, response, eventLoop in
             let files: [S3FileDescriptor] = response.contents?.compactMap {
                 guard let key = $0.key,
                       let lastModified = $0.lastModified,
                       let fileSize = $0.size else { return nil }
                 return S3FileDescriptor(
-                    file: S3File(bucket: folder.bucket, path: key),
+                    file: S3File(bucket: folder.bucket, key: key),
                     modificationDate: lastModified,
                     size: Int(fileSize)
                 )
@@ -500,7 +500,7 @@ extension S3FileTransferManager {
         let srcFolder = srcFolder.appendingSuffixIfNeeded("/")
         return files.map { file in
             let pathRelative = file.name.removingPrefix(srcFolder)
-            return (from: file, to: S3File(bucket: destFolder.bucket, path: destFolder.path + pathRelative))
+            return (from: file, to: S3File(bucket: destFolder.bucket, key: destFolder.key + pathRelative))
         }
     }
 
@@ -509,7 +509,7 @@ extension S3FileTransferManager {
     static func targetFiles(files: [S3FileDescriptor], from srcFolder: S3Folder, to destFolder: String) -> [(from: S3FileDescriptor, to: String)] {
         let destFolder = destFolder.appendingSuffixIfNeeded("/")
         return files.map { file in
-            let pathRelative = file.file.path.removingPrefix(srcFolder.path)
+            let pathRelative = file.file.key.removingPrefix(srcFolder.key)
             return (from: file, to: destFolder + pathRelative)
         }
     }
@@ -518,8 +518,8 @@ extension S3FileTransferManager {
     /// the source path prefixed
     static func targetFiles(files: [S3FileDescriptor], from srcFolder: S3Folder, to destFolder: S3Folder) -> [(from: S3FileDescriptor, to: S3File)] {
         return files.map { file in
-            let pathRelative = file.file.path.removingPrefix(srcFolder.path)
-            return (from: file, to: .init(bucket: destFolder.bucket, path: destFolder.path + pathRelative))
+            let pathRelative = file.file.key.removingPrefix(srcFolder.key)
+            return (from: file, to: .init(bucket: destFolder.bucket, key: destFolder.key + pathRelative))
         }
     }
 

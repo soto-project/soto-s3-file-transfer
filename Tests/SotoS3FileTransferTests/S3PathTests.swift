@@ -26,15 +26,15 @@ final class S3PathTests: XCTestCase {
         let folder6 = S3Folder(url: "S4://my-bucket/folder/folder2")
 
         XCTAssertEqual(folder1?.bucket, "my-bucket")
-        XCTAssertEqual(folder1?.path, "")
+        XCTAssertEqual(folder1?.key, "")
         XCTAssertEqual(folder2?.bucket, "my-bucket")
-        XCTAssertEqual(folder2?.path, "")
+        XCTAssertEqual(folder2?.key, "")
         XCTAssertEqual(folder3?.bucket, "my-bucket")
-        XCTAssertEqual(folder3?.path, "folder/")
+        XCTAssertEqual(folder3?.key, "folder/")
         XCTAssertEqual(folder4?.bucket, "my-bucket")
-        XCTAssertEqual(folder4?.path, "folder/")
+        XCTAssertEqual(folder4?.key, "folder/")
         XCTAssertEqual(folder5?.bucket, "my-bucket")
-        XCTAssertEqual(folder5?.path, "folder/folder2/")
+        XCTAssertEqual(folder5?.key, "folder/folder2/")
         XCTAssertNil(folder6)
     }
 
@@ -44,9 +44,9 @@ final class S3PathTests: XCTestCase {
         let file3 = S3File(url: "s3://my-bucket/file/")
 
         XCTAssertEqual(file1?.bucket, "my-bucket")
-        XCTAssertEqual(file1?.path, "file")
+        XCTAssertEqual(file1?.key, "file")
         XCTAssertEqual(file2?.bucket, "my-bucket")
-        XCTAssertEqual(file2?.path, "folder/file")
+        XCTAssertEqual(file2?.key, "folder/file")
         XCTAssertNil(file3)
     }
 
