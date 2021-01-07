@@ -9,35 +9,42 @@ Soto S3 Transfer uses the Soto Swift SDK for AWS. You need to create a Soto S3 s
 ```swift
 let client = AWSClient(httpClientProvider: .createNew)
 let s3 = S3(client: client, region: .euwest1)
-let s3Transfer = S3TransferManager(s3: s3, threadPoolProvider: .createNew)
+let s3FileTransfer = S3FileTransferManager(s3: s3, threadPoolProvider: .createNew)
 ```
 
 ## Upload to S3
 
 Uploading files to S3 is done with one call. The call returns a [NIO](https://github.com/apple/swift-nio) EventLoopFuture which will be fulfilled with the response when the operation is finished.
 ```swift
-let uploadFuture = s3Transfer.copy(
+let uploadFuture = s3FileTransfer.copy(
     from: "/Users/me/images/test.jpg", 
     to: S3File(url: "s3://my-bucket/test.jpg")!
 )
 ```
 You can also upload a folder as follows
 ```swift
-let uploadFuture = s3Transfer.copy(
+let uploadFuture = s3FileTransfer.copy(
     from: "/Users/me/images/", 
     to: S3Folder(url: "s3://my-bucket/images/")!
 )
 ```
-
+If you are uploading a folder multiple files will be uploaded in parallel. The number of upload tasks running concurrently defaults to 4 but you can control this by setting `maxConcurrentTasks` in the `Configuration` you supply to the initialization of `S3FileTransferManager`.
+```swift
+let s3Transfer = S3FileTransferManager(
+    s3: s3, 
+    threadPoolProvider: .createNew,
+    configuration: .init(maxConcurrentTasks: 8)
+)
+```
 ## Download from S3
 
 Download is as simple as upload just swap the parameters around
 ```swift
-let downloadFuture = s3Transfer.copy(
+let downloadFuture = s3FileTransfer.copy(
     from: S3File(url: "s3://my-bucket/test.jpg")!, 
     to: "/Users/me/images/test.jpg"
 )
-let downloadFolderFuture = s3Transfer.copy(
+let downloadFolderFuture = s3FileTransfer.copy(
     from: S3Folder(url: "s3://my-bucket/images/")!, 
     to: "/Users/me/downloads/images/"
 )
@@ -47,11 +54,11 @@ let downloadFolderFuture = s3Transfer.copy(
 
 You can also copy from one S3 bucket to another by supplying two `S3Files` or two `S3Folders`
 ```swift
-let copyFuture = s3Transfer.copy(
+let copyFuture = s3FileTransfer.copy(
     from: S3File(url: "s3://my-bucket/test2.jpg")!, 
     to: S3File(url: "s3://my-bucket/test.jpg")!
 )
-let copyFolderFuture = s3Transfer.copy(
+let copyFolderFuture = s3FileTransfer.copy(
     from: S3Folder(url: "s3://my-bucket/images/")!, 
     to: S3Folder(url: "s3://my-other-bucket/images/")!)
 )
@@ -62,12 +69,12 @@ let copyFolderFuture = s3Transfer.copy(
 There are `sync` versions of these operations as well. This will only copy files across if they are newer than the existing files. You can also have it delete files  in the target folder if they don't exist in the source folder.
 
 ```swift
-let uploadSyncFuture = s3Transfer.sync(
+let uploadSyncFuture = s3FileTransfer.sync(
     from: "/Users/me/images/", 
     to: S3Folder(url: "s3://my-bucket/images")!,
     delete: true
 )
-let downloadFuture = s3Transfer.copy(
+let downloadFuture = s3FileTransfer.copy(
     from: S3Folder(url: "s3://my-bucket/images")!, 
     to: "/Users/me/downloads/images/",
     delete: false
@@ -78,7 +85,7 @@ let downloadFuture = s3Transfer.copy(
 
 If uploads are above a certain size then the transfer manager will use multipart upload to upload the file to S3. You can control what this threshold is and the multipart part sizes by supplying a configuration at initialization of the manager. If you don't supply a configuration both of these values are set to 8MB.
 ```swift
-let s3Transfer = S3TransferManager(
+let s3Transfer = S3FileTransferManager(
     s3: s3, 
     threadPoolProvider: .createNew,
     configuration: .init(multipartThreshold: 16*1024*1024, multipartPartSize: 16*1024*1024)
