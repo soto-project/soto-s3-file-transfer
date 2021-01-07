@@ -195,12 +195,8 @@ final class S3FileTransferManagerTests: XCTestCase {
         var files: [S3FileTransferManager.FileDescriptor]?
         XCTAssertNoThrow(files = try Self.s3FileTransfer.listFiles(in: self.rootPath + "/Tests2").wait())
         XCTAssertNotNil(files?.first(where: { $0.name == "\(self.rootPath)/Tests2/SotoS3FileTransferTests/S3PathTests.swift" }))
-
-        if let files = files {
-            for file in files {
-                XCTAssertNoThrow(try FileManager.default.removeItem(atPath: file.name))
-            }
-        }
+        // remove folder
+        XCTAssertNoThrow(try FileManager.default.removeItem(atPath: self.rootPath + "/Tests2"))
     }
 
     func testDeleteFolder() {
