@@ -29,15 +29,16 @@ class TaskQueue<Value> {
             self.promise = eventLoop.makePromise(of: Value.self)
         }
     }
+
     struct Cancelled: Error {}
-    
+
     let maxConcurrentTasks: Int
     let eventLoop: EventLoop
-    
+
     private var currentTasks: Int
     private var queue: CircularBuffer<PendingTask<Value>>
     private var inflightTasks: [PendingTask<Value>]
-    
+
     init(maxConcurrentTasks: Int, on eventLoop: EventLoop) {
         self.maxConcurrentTasks = maxConcurrentTasks
         self.eventLoop = eventLoop
@@ -45,7 +46,7 @@ class TaskQueue<Value> {
         self.currentTasks = 0
         self.inflightTasks = []
     }
-    
+
     @discardableResult func submitTask(_ task: @escaping () -> EventLoopFuture<Value>) -> EventLoopFuture<Value> {
         self.eventLoop.flatSubmit {
             let task = PendingTask(task, on: self.eventLoop)
@@ -59,7 +60,7 @@ class TaskQueue<Value> {
             return task.promise.futureResult
         }
     }
-    
+
     /// Return EventLoopFuture that succeeds only when all the tasks succeed.
     func andAllSucceed() -> EventLoopFuture<Void> {
         self.eventLoop.flatSubmit {
@@ -67,7 +68,7 @@ class TaskQueue<Value> {
             return EventLoopFuture.andAllSucceed(futures, on: self.eventLoop)
         }
     }
-    
+
     /// Return EventLoopFuture that succeeds when all the tasks have completed
     func flush() -> EventLoopFuture<Void> {
         self.eventLoop.flatSubmit {
@@ -75,7 +76,7 @@ class TaskQueue<Value> {
             return EventLoopFuture.andAllComplete(futures, on: self.eventLoop)
         }
     }
-    
+
     /// Cancel all tasks in the queue and return EventLoopFuture that succeeds when all in flight tasks have completed.
     func cancel() -> EventLoopFuture<Void> {
         self.eventLoop.flatSubmit { () -> EventLoopFuture<Void> in
@@ -85,7 +86,7 @@ class TaskQueue<Value> {
                 .always { _ in }
         }
     }
-    
+
     private func invoke(_ task: PendingTask<Value>) {
         self.eventLoop.preconditionInEventLoop()
         precondition(self.currentTasks < self.maxConcurrentTasks)
@@ -94,10 +95,10 @@ class TaskQueue<Value> {
         self.inflightTasks.append(task)
         assert(self.inflightTasks.count == self.currentTasks)
         task.task().hop(to: self.eventLoop).whenComplete { result in
-            
+
             let taskIndex = self.inflightTasks.firstIndex { $0.id == task.id }!
             self.inflightTasks.remove(at: taskIndex)
-            
+
             self.currentTasks -= 1
             self.invokeIfNeeded()
             task.promise.completeWith(result)

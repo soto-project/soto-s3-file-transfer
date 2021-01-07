@@ -44,13 +44,13 @@ public struct S3FileTransferManager {
             self.maxConcurrentTasks = maxConcurrentTasks
         }
     }
-    
+
     /// Errors created by S3TransferManager
     public enum Error: Swift.Error {
         case failedToCreateFolder(String)
         case failedToEnumerateFolder(String)
     }
-    
+
     /// S3 service object
     public let s3: S3
     /// Thread pool used by transfer manager
@@ -192,7 +192,7 @@ public struct S3FileTransferManager {
         let eventLoop = self.s3.eventLoopGroup.next()
         let copySource = "/\(from.bucket)/\(from.path)".addingPercentEncoding(withAllowedCharacters: Self.pathAllowedCharacters)!
         let request = S3.CopyObjectRequest(bucket: to.bucket, copySource: copySource, key: to.path, options: options)
-        
+
         let fileSizeFuture: EventLoopFuture<Int>
         if let fileSize = fileSize {
             fileSizeFuture = eventLoop.makeSucceededFuture(fileSize)
@@ -388,7 +388,7 @@ public struct S3FileTransferManager {
     /// delete a file on S3
     public func delete(_ s3File: S3File) -> EventLoopFuture<Void> {
         self.logger.info("Deleting \(s3File)")
-        return self.s3.deleteObject(.init(bucket: s3File.bucket, key: s3File.path), logger: logger).map { _ in }
+        return self.s3.deleteObject(.init(bucket: s3File.bucket, key: s3File.path), logger: self.logger).map { _ in }
     }
 
     /// delete a folder on S3
@@ -414,7 +414,7 @@ extension S3FileTransferManager {
         let modificationDate: Date
         let size: Int
     }
-    
+
     /// Wait on all tasks succeeding. If there is an error the operation will either continue or cancel depending on `Configuration.cancelOnError`
     func complete<T>(taskQueue: TaskQueue<T>) -> EventLoopFuture<Void> {
         taskQueue.andAllSucceed()
@@ -426,7 +426,7 @@ extension S3FileTransferManager {
                 }
             }
     }
-    
+
     /// List files in local folder
     func listFiles(in folder: String) -> EventLoopFuture<[FileDescriptor]> {
         let eventLoop = self.s3.eventLoopGroup.next()
@@ -458,11 +458,11 @@ extension S3FileTransferManager {
     /// List files in S3 folder
     func listFiles(in folder: S3Folder) -> EventLoopFuture<[S3FileDescriptor]> {
         let request = S3.ListObjectsV2Request(bucket: folder.bucket, prefix: folder.path)
-        return self.s3.listObjectsV2Paginator(request, [], logger: logger) { accumulator, response, eventLoop in
+        return self.s3.listObjectsV2Paginator(request, [], logger: self.logger) { accumulator, response, eventLoop in
             let files: [S3FileDescriptor] = response.contents?.compactMap {
                 guard let key = $0.key,
-                    let lastModified = $0.lastModified,
-                    let fileSize = $0.size else { return nil }
+                      let lastModified = $0.lastModified,
+                      let fileSize = $0.size else { return nil }
                 return S3FileDescriptor(
                     file: S3File(bucket: folder.bucket, path: key),
                     modificationDate: lastModified,
@@ -509,7 +509,7 @@ extension S3FileTransferManager {
             return (from: file, to: .init(bucket: destFolder.bucket, path: destFolder.path + pathRelative))
         }
     }
-    
+
     static let pathAllowedCharacters = CharacterSet.urlPathAllowed.subtracting(.init(charactersIn: "+"))
 }
 
@@ -525,4 +525,3 @@ extension EventLoopFuture {
         }
     }
 }
-

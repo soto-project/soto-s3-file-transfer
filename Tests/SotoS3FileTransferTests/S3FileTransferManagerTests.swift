@@ -24,7 +24,7 @@ final class S3FileTransferManagerTests: XCTestCase {
 
     override class func setUp() {
         self.client = AWSClient(httpClientProvider: .createNew)
-        self.s3 = S3(client: self.client, region: .euwest1)//.with(middlewares: [AWSLoggingMiddleware()])
+        self.s3 = S3(client: self.client, region: .euwest1) // .with(middlewares: [AWSLoggingMiddleware()])
         self.s3FileTransfer = .init(s3: self.s3, threadPoolProvider: .createNew, logger: Logger(label: "S3TransferTests"))
 
         XCTAssertNoThrow(try self.s3.createBucket(.init(bucket: self.bucketName)).wait())
@@ -217,8 +217,8 @@ final class S3FileTransferManagerTests: XCTestCase {
     func testBigFolderUpload() {
         let folder = S3Folder(bucket: Self.bucketName, path: "testBigFolderUpload")
         let folder2 = S3Folder(bucket: Self.bucketName, path: "testBigFolderUpload_Copy")
-        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: "\(self.rootPath)/.build/checkouts/soto/Sources/Soto/Services" , to: folder, delete: true).wait())
-        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder , to: folder2, delete: true).wait())
+        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: "\(self.rootPath)/.build/checkouts/soto/Sources/Soto/Services", to: folder, delete: true).wait())
+        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder, to: folder2, delete: true).wait())
     }
 
     /// test we get an error when trying to download a folder on top of a file
