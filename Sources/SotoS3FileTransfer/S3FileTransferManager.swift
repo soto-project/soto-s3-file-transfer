@@ -146,22 +146,35 @@ public struct S3FileTransferManager {
         let eventLoop = self.s3.eventLoopGroup.next()
         var bytesDownloaded = 0
 
-        return self.threadPool.runIfActive(eventLoop: eventLoop) { () -> Void in
-            // create folder to place file in, if it doesn't exist already
-            let folder: String
+        return self.threadPool.runIfActive(eventLoop: eventLoop) { () -> String in
+            var to = to
+            // if `to` is a folder append name of object to end of `to` string to place object in folder `to`.
             var isDirectory: ObjCBool = false
-            if let lastSlash = to.lastIndex(of: "/") {
-                folder = String(to[to.startIndex..<lastSlash])
+            if FileManager.default.fileExists(atPath: to, isDirectory: &isDirectory), isDirectory.boolValue == true {
+                if var lastSlash = from.path.lastIndex(of: "/") {
+                    lastSlash = from.path.index(after: lastSlash)
+                    to = "\(to)/\(from.path[lastSlash...])"
+                } else {
+                    to = "\(to)/\(from.path)"
+                }
             } else {
-                folder = to
+                // create folder to place file in, if it doesn't exist already
+                let folder: String
+                var isDirectory: ObjCBool = false
+                if let lastSlash = to.lastIndex(of: "/") {
+                    folder = String(to[..<lastSlash])
+                } else {
+                    folder = to
+                }
+                if FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory) {
+                    guard isDirectory.boolValue else { throw Error.failedToCreateFolder(folder) }
+                } else {
+                    try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+                }
             }
-            if FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory) {
-                guard isDirectory.boolValue else { throw Error.failedToCreateFolder(folder) }
-            } else {
-                try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
-            }
-        }.flatMap {
-            self.fileIO.openFile(path: to, mode: .write, flags: .allowFileCreation(), eventLoop: eventLoop)
+            return to
+        }.flatMap { filename in
+            self.fileIO.openFile(path: filename, mode: .write, flags: .allowFileCreation(), eventLoop: eventLoop)
         }.flatMap { fileHandle -> EventLoopFuture<S3.GetObjectOutput> in
             // get filesize so we can calculate progress
             return self.s3.headObject(.init(bucket: from.bucket, key: from.path), logger: logger, on: eventLoop)

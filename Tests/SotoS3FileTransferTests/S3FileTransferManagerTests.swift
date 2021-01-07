@@ -184,7 +184,7 @@ final class S3FileTransferManagerTests: XCTestCase {
         XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: folder1, to: folder2).wait())
         var files: [S3FileTransferManager.S3FileDescriptor]?
         XCTAssertNoThrow(files = try Self.s3FileTransfer.listFiles(in: folder2).wait())
-        XCTAssertNotNil(files?.first(where: { $0.file.path == "testS3toS3CopyPath_Copy/SotoS3FileTransfer/S3TransferManager.swift" }))
+        XCTAssertNotNil(files?.first(where: { $0.file.path == "testS3toS3CopyPath_Copy/SotoS3FileTransfer/S3FileTransferManager.swift" }))
     }
 
     func testSyncPathLocalToS3() {
@@ -215,6 +215,20 @@ final class S3FileTransferManagerTests: XCTestCase {
         let folder2 = S3Folder(bucket: Self.bucketName, path: "testBigFolderUpload_Copy")
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: "\(self.rootPath)/.build/checkouts/soto/Sources/Soto/Services", to: folder, delete: true).wait())
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder, to: folder2, delete: true).wait())
+    }
+
+    /// test we get an error when trying to download a folder on top of a file
+    func testDownloadFileToFolder() {
+        let filename = "\(rootPath)/\(#function)"
+        let s3File = S3File(bucket: Self.bucketName, path: "testDownload/test.dat")
+        let buffer = self.createRandomBuffer(size: 202_400)
+        do {
+            XCTAssertNoThrow(try buffer.write(to: URL(fileURLWithPath: filename)))
+            defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename)) }
+            XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: filename, to: s3File).wait())
+        }
+        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: s3File, to: rootPath+"/").wait())
+        XCTAssertNoThrow(try FileManager.default.removeItem(atPath: "\(rootPath)/test.dat"))
     }
 
     /// test we get an error when trying to download a folder on top of a file
