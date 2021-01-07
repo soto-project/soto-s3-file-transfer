@@ -139,6 +139,7 @@ final class S3FileTransferManagerTests: XCTestCase {
         XCTAssertNil(files?.firstIndex { $0.file.path == "testListS3Files2/1.txt" })
     }
 
+    /// test the list of target files is calculated correctly
     func testTargetFiles() {
         let files: [S3FileTransferManager.FileDescriptor] = [
             .init(name: "/User/JohnSmith/Documents/test.doc", modificationDate: Date()),
@@ -153,6 +154,7 @@ final class S3FileTransferManagerTests: XCTestCase {
         XCTAssertEqual(s3Files2[1].to.path, "test/Documents/hello.doc")
     }
 
+    /// test the list of s3 target files is calculated correctly
     func testS3TargetFiles() {
         let s3Files: [S3FileTransferManager.S3FileDescriptor] = [
             .init(file: S3File(url: "s3://my-bucket/User/JohnSmith/Documents/test.doc")!, modificationDate: Date(), size: 1024),
@@ -218,7 +220,21 @@ final class S3FileTransferManagerTests: XCTestCase {
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: "\(self.rootPath)/.build/checkouts/soto/Sources/Soto/Services" , to: folder, delete: true).wait())
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder , to: folder2, delete: true).wait())
     }
-    
+
+    /// test we get an error when trying to download a folder on top of a file
+    func testDownloadFolderToFile() {
+        let folder1 = S3Folder(bucket: Self.bucketName, path: "testDownloadFolderToFile")
+        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: self.rootPath + "/Sources", to: folder1).wait())
+        XCTAssertThrowsError(try Self.s3FileTransfer.copy(from: folder1, to: "\(self.rootPath)/Package.swift").wait()) { error in
+            switch error {
+            case let error as NSError:
+                XCTAssertEqual(error.code, 512)
+            default:
+                XCTFail("\(error)")
+            }
+        }
+    }
+
     var rootPath: String {
         return #file
             .split(separator: "/", omittingEmptySubsequences: false)
