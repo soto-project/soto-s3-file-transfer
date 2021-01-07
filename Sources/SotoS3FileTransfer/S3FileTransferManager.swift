@@ -18,7 +18,7 @@ import NIO
 import SotoS3
 
 /// S3 Transfer manager. Transfers files/folders back and forth between S3 and your local file system
-public struct S3TransferManager {
+public struct S3FileTransferManager {
     /// Configuration for S3 Transfer Manager
     public struct Configuration {
         /// Cancel operations as soon as an error is found. Otherwise the operation will be attempt to finish all transfers
@@ -403,7 +403,7 @@ public struct S3TransferManager {
     }
 }
 
-extension S3TransferManager {
+extension S3FileTransferManager {
     struct FileDescriptor {
         let name: String
         let modificationDate: Date

@@ -16,19 +16,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "soto-s3-transfer",
+    name: "soto-s3-file-transfer",
     products: [
-        .library(name: "SotoS3Transfer", targets: ["SotoS3Transfer"]),
+        .library(name: "SotoS3FileTransfer", targets: ["SotoS3FileTransfer"]),
     ],
     dependencies: [
         .package(url: "https://github.com/soto-project/soto.git", from: "5.0.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0")
     ],
     targets: [
-        .target(name: "SotoS3Transfer", dependencies: [
+        .target(name: "SotoS3FileTransfer", dependencies: [
             .product(name: "SotoS3", package: "soto"),
             .product(name: "Logging", package: "swift-log"),
         ]),
-        .testTarget(name: "SotoS3TransferTests", dependencies: ["SotoS3Transfer"]),
+        .testTarget(name: "SotoS3FileTransferTests", dependencies: ["SotoS3FileTransfer"]),
     ]
 )

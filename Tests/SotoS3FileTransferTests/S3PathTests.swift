@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 import SotoS3
-@testable import SotoS3Transfer
+@testable import SotoS3FileTransfer
 import XCTest
 
 final class S3PathTests: XCTestCase {

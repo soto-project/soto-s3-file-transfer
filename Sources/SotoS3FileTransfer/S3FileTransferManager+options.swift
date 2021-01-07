@@ -8,7 +8,7 @@
 import Foundation
 import SotoS3
 
-extension S3TransferManager {
+extension S3FileTransferManager {
     public struct PutOptions {
         /// The canned ACL to apply to the object. For more information, see Canned ACL. This action is not supported by Amazon S3 on Outposts.
         public let acl: S3.ObjectCannedACL?
@@ -131,7 +131,7 @@ extension S3TransferManager {
 }
 
 extension S3.PutObjectRequest {
-    init(body: AWSPayload, bucket: String, key: String, options: S3TransferManager.PutOptions) {
+    init(body: AWSPayload, bucket: String, key: String, options: S3FileTransferManager.PutOptions) {
         self.init(
             acl: options.acl,
             body: body,
@@ -167,7 +167,7 @@ extension S3.PutObjectRequest {
 }
 
 extension S3.CreateMultipartUploadRequest {
-    init(bucket: String, key: String, options: S3TransferManager.PutOptions) {
+    init(bucket: String, key: String, options: S3FileTransferManager.PutOptions) {
         self.init(
             acl: options.acl,
             bucket: bucket,
@@ -202,7 +202,7 @@ extension S3.CreateMultipartUploadRequest {
 }
 
 extension S3.CopyObjectRequest {
-    init(bucket: String, copySource: String, key: String, options: S3TransferManager.CopyOptions) {
+    init(bucket: String, copySource: String, key: String, options: S3FileTransferManager.CopyOptions) {
         self.init(
             acl: options.acl,
             bucket: bucket,
@@ -238,7 +238,7 @@ extension S3.CopyObjectRequest {
 }
 
 extension S3.GetObjectRequest {
-    init(bucket: String, key: String, options: S3TransferManager.GetOptions) {
+    init(bucket: String, key: String, options: S3FileTransferManager.GetOptions) {
         self.init(
             bucket: bucket,
             expectedBucketOwner: options.expectedBucketOwner,
