@@ -47,6 +47,7 @@ public struct S3FileTransferManager {
 
     /// Errors created by S3TransferManager
     public enum Error: Swift.Error {
+        case fileDoesNotExist(String)
         case failedToCreateFolder(String)
         case failedToEnumerateFolder(String)
     }
@@ -107,6 +108,9 @@ public struct S3FileTransferManager {
         self.logger.info("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
         return self.fileIO.openFile(path: from, eventLoop: eventLoop)
+            .flatMapErrorThrowing { error in
+                throw Error.fileDoesNotExist(String(describing: from))
+            }
             .flatMap { fileHandle, fileRegion in
                 let fileSize = fileRegion.readableBytes
                 // if file size is greater than multipart threshold then use multipart upload for uploading the file
@@ -145,51 +149,58 @@ public struct S3FileTransferManager {
         self.logger.info("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
         var bytesDownloaded = 0
+        var fileSize: Int64 = 0
 
-        return self.threadPool.runIfActive(eventLoop: eventLoop) { () -> String in
-            var to = to
-            // if `to` is a folder append name of object to end of `to` string to place object in folder `to`.
-            var isDirectory: ObjCBool = false
-            if FileManager.default.fileExists(atPath: to, isDirectory: &isDirectory), isDirectory.boolValue == true {
-                if var lastSlash = from.key.lastIndex(of: "/") {
-                    lastSlash = from.key.index(after: lastSlash)
-                    to = "\(to)/\(from.key[lastSlash...])"
-                } else {
-                    to = "\(to)/\(from.key)"
-                }
-            } else {
-                // create folder to place file in, if it doesn't exist already
-                let folder: String
-                var isDirectory: ObjCBool = false
-                if let lastSlash = to.lastIndex(of: "/") {
-                    folder = String(to[..<lastSlash])
-                } else {
-                    folder = to
-                }
-                if FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory) {
-                    guard isDirectory.boolValue else { throw Error.failedToCreateFolder(folder) }
-                } else {
-                    try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        // check for existence of file and get its filesize so we can calculate progress
+        return self.s3.headObject(.init(bucket: from.bucket, key: from.key), logger: logger, on: eventLoop).flatMapErrorThrowing { error in
+            if let error = error as? AWSRawError {
+                if error.context.responseCode == .notFound {
+                    throw Error.fileDoesNotExist(String(describing: from))
                 }
             }
-            return to
+            throw error
+        }.flatMap { response in
+            fileSize = response.contentLength ?? 1
+            return self.threadPool.runIfActive(eventLoop: eventLoop) { () -> String in
+                var to = to
+                // if `to` is a folder append name of object to end of `to` string to place object in folder `to`.
+                var isDirectory: ObjCBool = false
+                if FileManager.default.fileExists(atPath: to, isDirectory: &isDirectory), isDirectory.boolValue == true {
+                    if var lastSlash = from.key.lastIndex(of: "/") {
+                        lastSlash = from.key.index(after: lastSlash)
+                        to = "\(to)/\(from.key[lastSlash...])"
+                    } else {
+                        to = "\(to)/\(from.key)"
+                    }
+                } else {
+                    // create folder to place file in, if it doesn't exist already
+                    let folder: String
+                    var isDirectory: ObjCBool = false
+                    if let lastSlash = to.lastIndex(of: "/") {
+                        folder = String(to[..<lastSlash])
+                    } else {
+                        folder = to
+                    }
+                    if FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory) {
+                        guard isDirectory.boolValue else { throw Error.failedToCreateFolder(folder) }
+                    } else {
+                        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+                    }
+                }
+                return to
+            }
         }.flatMap { filename in
             self.fileIO.openFile(path: filename, mode: .write, flags: .allowFileCreation(), eventLoop: eventLoop)
         }.flatMap { fileHandle -> EventLoopFuture<S3.GetObjectOutput> in
-            // get filesize so we can calculate progress
-            return self.s3.headObject(.init(bucket: from.bucket, key: from.key), logger: logger, on: eventLoop)
-                .flatMap { response in
-                    let fileSize = response.contentLength ?? 1
-                    let request = S3.GetObjectRequest(bucket: from.bucket, key: from.key, options: options)
-                    return self.s3.getObjectStreaming(request, logger: logger, on: eventLoop) { byteBuffer, eventLoop in
-                        let bufferSize = byteBuffer.readableBytes
-                        return self.fileIO.write(fileHandle: fileHandle, buffer: byteBuffer, eventLoop: eventLoop).flatMapThrowing { _ in
-                            bytesDownloaded += bufferSize
-                            try progress(Double(bytesDownloaded) / Double(fileSize))
-                        }
-                    }
+            let request = S3.GetObjectRequest(bucket: from.bucket, key: from.key, options: options)
+            return self.s3.getObjectStreaming(request, logger: logger, on: eventLoop) { byteBuffer, eventLoop in
+                let bufferSize = byteBuffer.readableBytes
+                return self.fileIO.write(fileHandle: fileHandle, buffer: byteBuffer, eventLoop: eventLoop).flatMapThrowing { _ in
+                    bytesDownloaded += bufferSize
+                    try progress(Double(bytesDownloaded) / Double(fileSize))
                 }
-                .closeFileHandle(fileHandle)
+            }
+            .closeFileHandle(fileHandle)
         }.map { _ in }
     }
 
@@ -221,6 +232,14 @@ public struct S3FileTransferManager {
                 return self.s3.copyObject(request, logger: logger)
                     .map { _ in }
             }
+        }
+        .flatMapErrorThrowing { error in
+            if let error = error as? AWSRawError {
+                if error.context.responseCode == .notFound {
+                    throw Error.fileDoesNotExist(String(describing: from))
+                }
+            }
+            throw error
         }
     }
 

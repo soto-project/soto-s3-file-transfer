@@ -106,6 +106,49 @@ final class S3FileTransferManagerTests: XCTestCase {
         XCTAssertEqual(buffer, buffer2)
     }
 
+    func testS3UploadOfNonExistentFile() {
+        let filename = "\(Self.tempFolder)/\(#function)"
+
+        let responseFuture = Self.s3FileTransfer.copy(from: filename, to: S3File(bucket: Self.bucketName, key: "doesNotExist"))
+        XCTAssertThrowsError(try responseFuture.wait()) { error in
+            switch error {
+            case S3FileTransferManager.Error.fileDoesNotExist(let filename2):
+                XCTAssertEqual(filename2, filename)
+                break
+            default:
+                XCTFail("\(error)")
+            }
+        }
+    }
+
+    func testS3DownloadOfNonExistentFile() {
+        let filename = "\(Self.tempFolder)/\(#function)"
+
+        let responseFuture = Self.s3FileTransfer.copy(from: S3File(bucket: Self.bucketName, key: "doesNotExist"), to: filename)
+        XCTAssertThrowsError(try responseFuture.wait()) { error in
+            switch error {
+            case S3FileTransferManager.Error.fileDoesNotExist(let filename):
+                XCTAssertEqual(filename, "s3://\(Self.bucketName)/doesNotExist")
+                break
+            default:
+                XCTFail("\(error)")
+            }
+        }
+    }
+
+    func testS3CopyOfNonExistentFile() {
+        let responseFuture = Self.s3FileTransfer.copy(from: S3File(bucket: Self.bucketName, key: "doesNotExist"), to: S3File(bucket: Self.bucketName, key: "destination"))
+        XCTAssertThrowsError(try responseFuture.wait()) { error in
+            switch error {
+            case S3FileTransferManager.Error.fileDoesNotExist(let filename):
+                XCTAssertEqual(filename, "s3://\(Self.bucketName)/doesNotExist")
+                break
+            default:
+                XCTFail("\(error)")
+            }
+        }
+    }
+
     func testS3MultipartCopy() {
         let filename = "\(Self.tempFolder)/\(#function)"
         let filename2 = "\(Self.tempFolder)/\(#function)2"
