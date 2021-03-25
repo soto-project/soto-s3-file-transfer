@@ -17,6 +17,7 @@ import PackageDescription
 
 let package = Package(
     name: "soto-s3-file-transfer",
+    platforms: [.iOS(.v12), .tvOS(.v12), .watchOS(.v5)],
     products: [
         .library(name: "SotoS3FileTransfer", targets: ["SotoS3FileTransfer"]),
     ],
