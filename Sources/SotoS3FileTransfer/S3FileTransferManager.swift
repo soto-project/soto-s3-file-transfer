@@ -494,7 +494,7 @@ extension S3FileTransferManager {
             let files: [S3FileDescriptor] = response.contents?.compactMap {
                 guard let key = $0.key,
                       let lastModified = $0.lastModified,
-                      let fileSize = $0.size else { return nil }
+                      let fileSize = $0.size == 0 ? nil : $0.size else { return nil }
                 return S3FileDescriptor(
                     file: S3File(bucket: folder.bucket, key: key),
                     modificationDate: lastModified,
