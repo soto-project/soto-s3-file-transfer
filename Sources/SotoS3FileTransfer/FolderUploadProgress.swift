@@ -33,6 +33,15 @@ extension S3FileTransferManager {
             self.progressFunc = progress
         }
         
+        init(_ files: [FileDescriptor], progress: @escaping (Double) throws -> Void = { _ in }) {
+            self.lock = Lock()
+            self.sizes = .init(files.map { (key: $0.name, value: UInt64($0.size))}) { first, second in first }
+            self.totalSize = sizes.values.reduce(UInt64(0), +)
+            self.uploadedSize = 0
+            self.currentUploadingSizes = [:]
+            self.progressFunc = progress
+        }
+        
         func updateProgress(_ file: String, progress: Double) throws {
             try lock.withLock {
                 currentUploadingSizes[file] = sizes[file].map { UInt64(Double($0) * progress) } ?? 0

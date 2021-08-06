@@ -188,8 +188,8 @@ final class S3FileTransferManagerTests: XCTestCase {
     /// test the list of target files is calculated correctly
     func testTargetFiles() {
         let files: [S3FileTransferManager.FileDescriptor] = [
-            .init(name: "/User/JohnSmith/Documents/test.doc", modificationDate: Date()),
-            .init(name: "/User/JohnSmith/Documents/hello.doc", modificationDate: Date())
+            .init(name: "/User/JohnSmith/Documents/test.doc", modificationDate: Date(), size: 0),
+            .init(name: "/User/JohnSmith/Documents/hello.doc", modificationDate: Date(), size: 0)
         ]
         let s3Files = S3FileTransferManager.targetFiles(files: files, from: "/User/JohnSmith/Documents/", to: S3Folder(url: "s3://my-bucket/")!)
         XCTAssertEqual(s3Files[0].to.key, "test.doc")
@@ -268,7 +268,12 @@ final class S3FileTransferManagerTests: XCTestCase {
         var fileCount: Int?
         XCTAssertNoThrow(fileCount = try Self.s3FileTransfer.listFiles(in: "\(Self.rootPath)/.build/checkouts/soto/Sources/Soto/Services/S3/").wait().count)
         XCTAssertNotNil(fileCount)
-        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: "\(Self.rootPath)/.build/checkouts/soto/Sources/Soto/Services", to: folder, delete: true).wait())
+        XCTAssertNoThrow(try Self.s3FileTransfer.sync(
+                            from: "\(Self.rootPath)/.build/checkouts/soto/Sources/Soto/Services",
+                            to: folder,
+                            delete: true,
+                            progress: {print($0)}
+        ).wait())
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder, to: folder2, delete: true).wait())
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder2.subFolder("DynamoDB"), to: tempFolder, delete: true).wait())
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder2.subFolder("S3"), to: tempFolder, delete: true, progress: {print($0)}).wait())
