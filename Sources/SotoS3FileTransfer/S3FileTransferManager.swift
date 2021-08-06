@@ -108,7 +108,7 @@ public struct S3FileTransferManager {
         self.logger.info("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
         return self.fileIO.openFile(path: from, eventLoop: eventLoop)
-            .flatMapErrorThrowing { error in
+            .flatMapErrorThrowing { _ in
                 throw Error.fileDoesNotExist(String(describing: from))
             }
             .flatMap { fileHandle, fileRegion in
@@ -154,7 +154,7 @@ public struct S3FileTransferManager {
         var fileSize: Int64 = 0
 
         // check for existence of file and get its filesize so we can calculate progress
-        return self.s3.headObject(.init(bucket: from.bucket, key: from.key), logger: logger, on: eventLoop).flatMapErrorThrowing { error in
+        return self.s3.headObject(.init(bucket: from.bucket, key: from.key), logger: self.logger, on: eventLoop).flatMapErrorThrowing { error in
             if let error = error as? AWSRawError {
                 if error.context.responseCode == .notFound {
                     throw Error.fileDoesNotExist(String(describing: from))
@@ -335,11 +335,12 @@ public struct S3FileTransferManager {
     ///   - to: Path to destination S3 folder
     ///   - delete: Should we delete files on S3 that don't exists locally
     /// - Returns: EventLoopFuture fulfilled when operation is complete
-    public func sync(from folder: String,
-         to s3Folder: S3Folder,
-         delete: Bool,
-         options: PutOptions = .init(),
-         progress: @escaping (Double) throws -> Void = { _ in }
+    public func sync(
+        from folder: String,
+        to s3Folder: S3Folder,
+        delete: Bool,
+        options: PutOptions = .init(),
+        progress: @escaping (Double) throws -> Void = { _ in }
     ) -> EventLoopFuture<Void> {
         let eventLoop = self.s3.eventLoopGroup.next()
 

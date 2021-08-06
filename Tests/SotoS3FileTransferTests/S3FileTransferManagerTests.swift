@@ -27,7 +27,7 @@ final class S3FileTransferManagerTests: XCTestCase {
         self.s3 = S3(client: self.client, region: .euwest1) // .with(middlewares: [AWSLoggingMiddleware()])
         self.s3FileTransfer = .init(s3: self.s3, threadPoolProvider: .createNew, logger: Logger(label: "S3TransferTests"))
 
-        XCTAssertNoThrow(try FileManager.default.createDirectory(atPath: tempFolder, withIntermediateDirectories: false))
+        XCTAssertNoThrow(try FileManager.default.createDirectory(atPath: self.tempFolder, withIntermediateDirectories: false))
         XCTAssertNoThrow(try self.s3.createBucket(.init(bucket: self.bucketName)).wait())
     }
 
@@ -50,8 +50,7 @@ final class S3FileTransferManagerTests: XCTestCase {
         }
         XCTAssertNoThrow(try response.wait())
         XCTAssertNoThrow(try self.client.syncShutdown())
-        XCTAssertNoThrow(try FileManager.default.removeItem(atPath: tempFolder))
-
+        XCTAssertNoThrow(try FileManager.default.removeItem(atPath: self.tempFolder))
     }
 
     func testUploadDownload() {
@@ -114,7 +113,6 @@ final class S3FileTransferManagerTests: XCTestCase {
             switch error {
             case S3FileTransferManager.Error.fileDoesNotExist(let filename2):
                 XCTAssertEqual(filename2, filename)
-                break
             default:
                 XCTFail("\(error)")
             }
@@ -129,7 +127,6 @@ final class S3FileTransferManagerTests: XCTestCase {
             switch error {
             case S3FileTransferManager.Error.fileDoesNotExist(let filename):
                 XCTAssertEqual(filename, "s3://\(Self.bucketName)/doesNotExist")
-                break
             default:
                 XCTFail("\(error)")
             }
@@ -142,7 +139,6 @@ final class S3FileTransferManagerTests: XCTestCase {
             switch error {
             case S3FileTransferManager.Error.fileDoesNotExist(let filename):
                 XCTAssertEqual(filename, "s3://\(Self.bucketName)/doesNotExist")
-                break
             default:
                 XCTFail("\(error)")
             }
@@ -237,11 +233,11 @@ final class S3FileTransferManagerTests: XCTestCase {
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: Self.rootPath + "/Tests", to: S3Folder(bucket: Self.bucketName, key: "testSyncPathLocalToS3"), delete: true).wait())
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: S3Folder(bucket: Self.bucketName, key: "testSyncPathLocalToS3"), to: S3Folder(bucket: Self.bucketName, key: "testSyncPathLocalToS3_v2"), delete: true).wait())
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(
-                            from: S3Folder(bucket: Self.bucketName, key: "testSyncPathLocalToS3_v2"),
-                            to: Self.tempFolder + "/Tests2",
-                            delete: true,
-                            progress: { print($0)}
-            ).wait())
+            from: S3Folder(bucket: Self.bucketName, key: "testSyncPathLocalToS3_v2"),
+            to: Self.tempFolder + "/Tests2",
+            delete: true,
+            progress: { print($0) }
+        ).wait())
 
         var files: [S3FileTransferManager.FileDescriptor]?
         XCTAssertNoThrow(files = try Self.s3FileTransfer.listFiles(in: Self.tempFolder + "/Tests2").wait())
@@ -269,14 +265,14 @@ final class S3FileTransferManagerTests: XCTestCase {
         XCTAssertNoThrow(fileCount = try Self.s3FileTransfer.listFiles(in: "\(Self.rootPath)/.build/checkouts/soto/Sources/Soto/Services/S3/").wait().count)
         XCTAssertNotNil(fileCount)
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(
-                            from: "\(Self.rootPath)/.build/checkouts/soto/Sources/Soto/Services",
-                            to: folder,
-                            delete: true,
-                            progress: {print($0)}
+            from: "\(Self.rootPath)/.build/checkouts/soto/Sources/Soto/Services",
+            to: folder,
+            delete: true,
+            progress: { print($0) }
         ).wait())
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder, to: folder2, delete: true).wait())
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder2.subFolder("DynamoDB"), to: tempFolder, delete: true).wait())
-        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder2.subFolder("S3"), to: tempFolder, delete: true, progress: {print($0)}).wait())
+        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder2.subFolder("S3"), to: tempFolder, delete: true) { print($0) }.wait())
         var files: [S3FileTransferManager.FileDescriptor]?
         XCTAssertNoThrow(files = try Self.s3FileTransfer.listFiles(in: tempFolder).wait())
         XCTAssertEqual(files?.count, fileCount)
