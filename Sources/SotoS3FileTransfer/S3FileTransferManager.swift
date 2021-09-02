@@ -50,6 +50,7 @@ public struct S3FileTransferManager {
         case fileDoesNotExist(String)
         case failedToCreateFolder(String)
         case failedToEnumerateFolder(String)
+        case fileFolderClash(String, String)
     }
 
     /// S3 service object
@@ -290,6 +291,7 @@ public struct S3FileTransferManager {
     ) -> EventLoopFuture<Void> {
         let eventLoop = self.s3.eventLoopGroup.next()
         return listFiles(in: s3Folder)
+            .flatMapThrowing { try self.validateFileList($0) }
             .flatMap { files in
                 let taskQueue = TaskQueue<Void>(maxConcurrentTasks: configuration.maxConcurrentTasks, on: eventLoop)
                 let transfers = Self.targetFiles(files: files, from: s3Folder, to: folder)
@@ -398,7 +400,7 @@ public struct S3FileTransferManager {
     ) -> EventLoopFuture<Void> {
         let eventLoop = self.s3.eventLoopGroup.next()
 
-        return listFiles(in: folder).and(listFiles(in: s3Folder))
+        return listFiles(in: folder).and(listFiles(in: s3Folder).flatMapThrowing { try self.validateFileList($0) })
             .flatMap { files, s3Files in
                 let taskQueue = TaskQueue<Void>(maxConcurrentTasks: configuration.maxConcurrentTasks, on: eventLoop)
                 let targetFiles = Self.targetFiles(files: s3Files, from: s3Folder, to: folder)
@@ -564,6 +566,25 @@ extension S3FileTransferManager {
                 )
             } ?? []
             return eventLoop.makeSucceededFuture((true, accumulator + files))
+        }
+    }
+
+    /// Validate we can save file list from S3 to file system
+    ///
+    /// Look for files that are the same name as directory names in other files
+    func validateFileList(_ list: [S3FileDescriptor]) throws -> [S3FileDescriptor] {
+        let list = list.sorted { $0.file.key < $1.file.key }
+        return try list.filter { file -> Bool in
+            let filename = file.file.key
+            for file2 in list {
+                let filename2 = file2.file.key
+                if filename2.hasPrefix(filename),
+                   (filename.last == "/" || filename2.dropFirst(filename.count).first == "/") {
+                    throw Error.fileFolderClash(filename2, filename)
+                    //return false
+                }
+            }
+            return true
         }
     }
 

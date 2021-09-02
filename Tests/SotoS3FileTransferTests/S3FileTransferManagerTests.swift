@@ -306,6 +306,29 @@ final class S3FileTransferManagerTests: XCTestCase {
         }
     }
 
+    /// check the correct error is thrown when trying to download a file on top of a folder
+    func testDownloadOfFolderName() {
+        let folder = S3Folder(bucket: Self.bucketName, key: "testDownloadOfFolderName")
+        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("folder"), bucket: Self.bucketName, key: "testDownloadOfFolderName/folder")).wait())
+        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("file"), bucket: Self.bucketName, key: "testDownloadOfFolderName/folder/file")).wait())
+        XCTAssertThrowsError(try Self.s3FileTransfer.copy(from: folder, to: Self.tempFolder).wait()) { error in
+            switch error {
+            case S3FileTransferManager.Error.fileFolderClash:
+                break
+            default:
+                XCTFail("\(error)")
+            }
+        }
+    }
+
+    /// check no error is thrown when trying to download a file with the same prefix
+    func testDownloadOfFolderName2() {
+        let folder = S3Folder(bucket: Self.bucketName, key: "testDownloadOfFolderName2")
+        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("file"), bucket: Self.bucketName, key: "testDownloadOfFolderName/folder")).wait())
+        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("file"), bucket: Self.bucketName, key: "testDownloadOfFolderName/folderfile")).wait())
+        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: folder, to: Self.tempFolder).wait())
+    }
+
     static var rootPath: String {
         return #file
             .split(separator: "/", omittingEmptySubsequences: false)
