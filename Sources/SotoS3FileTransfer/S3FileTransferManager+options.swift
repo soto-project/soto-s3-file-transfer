@@ -120,7 +120,10 @@ extension S3FileTransferManager {
         /// VersionId used to reference a specific version of the object.
         public let versionId: String?
 
-        public init(expectedBucketOwner: String? = nil, ifMatch: String? = nil, ifModifiedSince: Date? = nil, ifNoneMatch: String? = nil, ifUnmodifiedSince: Date? = nil, requestPayer: S3.RequestPayer? = nil, sSECustomerAlgorithm: String? = nil, sSECustomerKey: String? = nil, sSECustomerKeyMD5: String? = nil, versionId: String? = nil) {
+        /// Ignore file folder clashes when downloading folders. When set to true the file is not downloaded
+        public let ignoreFileFolderClashes: Bool
+
+        public init(expectedBucketOwner: String? = nil, ifMatch: String? = nil, ifModifiedSince: Date? = nil, ifNoneMatch: String? = nil, ifUnmodifiedSince: Date? = nil, requestPayer: S3.RequestPayer? = nil, sSECustomerAlgorithm: String? = nil, sSECustomerKey: String? = nil, sSECustomerKeyMD5: String? = nil, versionId: String? = nil, ignoreFileFolderClashes: Bool = false) {
             self.expectedBucketOwner = expectedBucketOwner
             self.ifMatch = ifMatch
             self.ifModifiedSince = ifModifiedSince
@@ -131,6 +134,8 @@ extension S3FileTransferManager {
             self.sSECustomerKey = sSECustomerKey
             self.sSECustomerKeyMD5 = sSECustomerKeyMD5
             self.versionId = versionId
+
+            self.ignoreFileFolderClashes = ignoreFileFolderClashes
         }
     }
 

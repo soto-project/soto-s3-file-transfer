@@ -307,14 +307,18 @@ final class S3FileTransferManagerTests: XCTestCase {
     }
 
     /// check the correct error is thrown when trying to download a file on top of a folder
-    func testDownloadOfFolderName() {
-        let folder = S3Folder(bucket: Self.bucketName, key: "testDownloadOfFolderName")
-        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("folder"), bucket: Self.bucketName, key: "testDownloadOfFolderName/folder")).wait())
-        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("file"), bucket: Self.bucketName, key: "testDownloadOfFolderName/folder/file")).wait())
+    func testFileFolderClash() {
+        let folder = S3Folder(bucket: Self.bucketName, key: "testFileFolderClash")
+        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("folder"), bucket: Self.bucketName, key: "testFileFolderClash/fold")).wait())
+        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("folder"), bucket: Self.bucketName, key: "testFileFolderClash/folder")).wait())
+        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("folder"), bucket: Self.bucketName, key: "testFileFolderClash/folder*")).wait())
+        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("file"), bucket: Self.bucketName, key: "testFileFolderClash/folder/file")).wait())
+        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("file"), bucket: Self.bucketName, key: "testFileFolderClash/folder/file2")).wait())
         XCTAssertThrowsError(try Self.s3FileTransfer.copy(from: folder, to: Self.tempFolder).wait()) { error in
             switch error {
-            case S3FileTransferManager.Error.fileFolderClash:
-                break
+            case S3FileTransferManager.Error.fileFolderClash(let file1, let file2):
+                XCTAssertEqual(file1, "testFileFolderClash/folder")
+                XCTAssertEqual(file2, "testFileFolderClash/folder/file")
             default:
                 XCTFail("\(error)")
             }
@@ -322,11 +326,17 @@ final class S3FileTransferManagerTests: XCTestCase {
     }
 
     /// check no error is thrown when trying to download a file with the same prefix
-    func testDownloadOfFolderName2() {
-        let folder = S3Folder(bucket: Self.bucketName, key: "testDownloadOfFolderName2")
-        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("file"), bucket: Self.bucketName, key: "testDownloadOfFolderName/folder")).wait())
-        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("file"), bucket: Self.bucketName, key: "testDownloadOfFolderName/folderfile")).wait())
-        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: folder, to: Self.tempFolder).wait())
+    func testIgnoreFileFolderClash() {
+        let folder = S3Folder(bucket: Self.bucketName, key: "testIgnoreFileFolderClash")
+        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("folder"), bucket: Self.bucketName, key: "testIgnoreFileFolderClash/fold")).wait())
+        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("folder"), bucket: Self.bucketName, key: "testIgnoreFileFolderClash/folder")).wait())
+        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("folder"), bucket: Self.bucketName, key: "testIgnoreFileFolderClash/folder*")).wait())
+        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("file"), bucket: Self.bucketName, key: "testIgnoreFileFolderClash/folder/file")).wait())
+        XCTAssertNoThrow(try Self.s3.putObject(.init(body: .string("file"), bucket: Self.bucketName, key: "testIgnoreFileFolderClash/folder/file2")).wait())
+        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: folder, to: Self.tempFolder + "/testIgnoreFileFolderClash", options: .init(ignoreFileFolderClashes: true)).wait())
+        var files: [S3FileTransferManager.FileDescriptor]?
+        XCTAssertNoThrow(files = try Self.s3FileTransfer.listFiles(in: Self.tempFolder + "/testIgnoreFileFolderClash").wait())
+        XCTAssertEqual(files?.count, 4)
     }
 
     static var rootPath: String {
