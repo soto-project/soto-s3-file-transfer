@@ -108,7 +108,7 @@ public struct S3FileTransferManager {
         self.logger.info("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
         return self.fileIO.openFile(path: from, eventLoop: eventLoop)
-            .flatMapErrorThrowing { error in
+            .flatMapErrorThrowing { _ in
                 throw Error.fileDoesNotExist(String(describing: from))
             }
             .flatMap { fileHandle, fileRegion in
@@ -127,14 +127,16 @@ public struct S3FileTransferManager {
                         on: eventLoop,
                         progress: progress
                     )
-                    .map { _ in }
+                    .flatMapThrowing { _ in try? progress(1.0) }
                     .closeFileHandle(fileHandle)
                 } else {
                     let payload: AWSPayload = .fileHandle(fileHandle, offset: 0, size: fileSize, fileIO: self.fileIO) { downloaded in
                         try progress(Double(downloaded) / Double(fileSize))
                     }
                     let request = S3.PutObjectRequest(body: payload, bucket: to.bucket, key: to.key, options: options)
-                    return self.s3.putObject(request, logger: logger, on: eventLoop).map { _ in }.closeFileHandle(fileHandle)
+                    return self.s3.putObject(request, logger: logger, on: eventLoop)
+                        .flatMapThrowing { _ in try? progress(1.0) }
+                        .closeFileHandle(fileHandle)
                 }
             }
     }
@@ -152,7 +154,7 @@ public struct S3FileTransferManager {
         var fileSize: Int64 = 0
 
         // check for existence of file and get its filesize so we can calculate progress
-        return self.s3.headObject(.init(bucket: from.bucket, key: from.key), logger: logger, on: eventLoop).flatMapErrorThrowing { error in
+        return self.s3.headObject(.init(bucket: from.bucket, key: from.key), logger: self.logger, on: eventLoop).flatMapErrorThrowing { error in
             if let error = error as? AWSRawError {
                 if error.context.responseCode == .notFound {
                     throw Error.fileDoesNotExist(String(describing: from))
@@ -248,16 +250,30 @@ public struct S3FileTransferManager {
     ///   - from: local folder
     ///   - to: Path to S3 folder
     /// - Returns: EventLoopFuture fulfilled when operation is complete
-    public func copy(from folder: String, to s3Folder: S3Folder, options: PutOptions = .init()) -> EventLoopFuture<Void> {
+    public func copy(
+        from folder: String,
+        to s3Folder: S3Folder,
+        options: PutOptions = .init(),
+        progress: @escaping (Double) throws -> Void = { _ in }
+    ) -> EventLoopFuture<Void> {
         let eventLoop = self.s3.eventLoopGroup.next()
         return listFiles(in: folder)
             .flatMap { files in
                 let taskQueue = TaskQueue<Void>(maxConcurrentTasks: configuration.maxConcurrentTasks, on: eventLoop)
                 let transfers = Self.targetFiles(files: files, from: folder, to: s3Folder)
+                let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
                 transfers.forEach { transfer in
-                    taskQueue.submitTask { self.copy(from: transfer.from.name, to: transfer.to, options: options) }
+                    taskQueue.submitTask {
+                        self.copy(from: transfer.from.name, to: transfer.to, options: options) {
+                            try folderProgress.updateProgress(transfer.from.name, progress: $0)
+                        }.map { _ in
+                            folderProgress.setFileUploaded(transfer.from.name)
+                        }
+                    }
                 }
-                return complete(taskQueue: taskQueue)
+                return complete(taskQueue: taskQueue).map { _ in
+                    assert(folderProgress.finished == true)
+                }
             }
     }
 
@@ -266,16 +282,30 @@ public struct S3FileTransferManager {
     ///   - from: Path to S3 folder
     ///   - to: Local folder
     /// - Returns: EventLoopFuture fulfilled when operation is complete
-    public func copy(from s3Folder: S3Folder, to folder: String, options: GetOptions = .init()) -> EventLoopFuture<Void> {
+    public func copy(
+        from s3Folder: S3Folder,
+        to folder: String,
+        options: GetOptions = .init(),
+        progress: @escaping (Double) throws -> Void = { _ in }
+    ) -> EventLoopFuture<Void> {
         let eventLoop = self.s3.eventLoopGroup.next()
         return listFiles(in: s3Folder)
             .flatMap { files in
                 let taskQueue = TaskQueue<Void>(maxConcurrentTasks: configuration.maxConcurrentTasks, on: eventLoop)
                 let transfers = Self.targetFiles(files: files, from: s3Folder, to: folder)
+                let folderProgress = FolderUploadProgress(files, progress: progress)
                 transfers.forEach { transfer in
-                    taskQueue.submitTask { self.copy(from: transfer.from.file, to: transfer.to, options: options) }
+                    taskQueue.submitTask {
+                        self.copy(from: transfer.from.file, to: transfer.to, options: options) {
+                            try folderProgress.updateProgress(transfer.from.file.name, progress: $0)
+                        }.map { _ in
+                            folderProgress.setFileUploaded(transfer.from.file.name)
+                        }
+                    }
                 }
-                return complete(taskQueue: taskQueue)
+                return complete(taskQueue: taskQueue).map { _ in
+                    assert(folderProgress.finished == true)
+                }
             }
     }
 
@@ -305,7 +335,13 @@ public struct S3FileTransferManager {
     ///   - to: Path to destination S3 folder
     ///   - delete: Should we delete files on S3 that don't exists locally
     /// - Returns: EventLoopFuture fulfilled when operation is complete
-    public func sync(from folder: String, to s3Folder: S3Folder, delete: Bool, options: PutOptions = .init()) -> EventLoopFuture<Void> {
+    public func sync(
+        from folder: String,
+        to s3Folder: S3Folder,
+        delete: Bool,
+        options: PutOptions = .init(),
+        progress: @escaping (Double) throws -> Void = { _ in }
+    ) -> EventLoopFuture<Void> {
         let eventLoop = self.s3.eventLoopGroup.next()
 
         return listFiles(in: folder).and(listFiles(in: s3Folder))
@@ -319,8 +355,15 @@ public struct S3FileTransferManager {
                     guard s3File.modificationDate > transfer.from.modificationDate else { return transfer }
                     return nil
                 }
+                let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
                 transfers.forEach { transfer in
-                    taskQueue.submitTask { self.copy(from: transfer.from.name, to: transfer.to, options: options) }
+                    taskQueue.submitTask {
+                        self.copy(from: transfer.from.name, to: transfer.to, options: options) {
+                            try folderProgress.updateProgress(transfer.from.name, progress: $0)
+                        }.map { _ in
+                            folderProgress.setFileUploaded(transfer.from.name)
+                        }
+                    }
                 }
                 // construct list of files to delete, if we are doing deletion
                 if delete == true {
@@ -333,7 +376,9 @@ public struct S3FileTransferManager {
                     }
                     deletions.forEach { deletion in taskQueue.submitTask { self.delete(deletion) } }
                 }
-                return complete(taskQueue: taskQueue)
+                return complete(taskQueue: taskQueue).map { _ in
+                    assert(folderProgress.finished == true)
+                }
             }
     }
 
@@ -345,7 +390,12 @@ public struct S3FileTransferManager {
     ///   - to: Local folder
     ///   - delete: Should we delete files locally that don't exists in S3
     /// - Returns: EventLoopFuture fulfilled when operation is complete
-    public func sync(from s3Folder: S3Folder, to folder: String, delete: Bool, options: GetOptions = .init()) -> EventLoopFuture<Void> {
+    public func sync(
+        from s3Folder: S3Folder,
+        to folder: String,
+        delete: Bool, options: GetOptions = .init(),
+        progress: @escaping (Double) throws -> Void = { _ in }
+    ) -> EventLoopFuture<Void> {
         let eventLoop = self.s3.eventLoopGroup.next()
 
         return listFiles(in: folder).and(listFiles(in: s3Folder))
@@ -359,8 +409,15 @@ public struct S3FileTransferManager {
                     guard file.modificationDate > transfer.from.modificationDate else { return transfer }
                     return nil
                 }
+                let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
                 transfers.forEach { transfer in
-                    taskQueue.submitTask { self.copy(from: transfer.from.file, to: transfer.to, options: options) }
+                    taskQueue.submitTask {
+                        self.copy(from: transfer.from.file, to: transfer.to, options: options) {
+                            try folderProgress.updateProgress(transfer.from.file.name, progress: $0)
+                        }.map { _ in
+                            folderProgress.setFileUploaded(transfer.from.file.name)
+                        }
+                    }
                 }
                 // construct list of files to delete, if we are doing deletion
                 if delete == true {
@@ -373,7 +430,9 @@ public struct S3FileTransferManager {
                     }
                     deletions.forEach { deletion in taskQueue.submitTask { self.delete(deletion) } }
                 }
-                return complete(taskQueue: taskQueue)
+                return complete(taskQueue: taskQueue).map { _ in
+                    assert(folderProgress.finished == true)
+                }
             }
     }
 
@@ -439,6 +498,7 @@ extension S3FileTransferManager {
     struct FileDescriptor {
         let name: String
         let modificationDate: Date
+        let size: Int
     }
 
     struct S3FileDescriptor {
@@ -467,7 +527,7 @@ extension S3FileTransferManager {
             let path = URL(fileURLWithPath: folder)
             guard let fileEnumerator = FileManager.default.enumerator(
                 at: path,
-                includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey],
+                includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey, .fileSizeKey],
                 options: .skipsHiddenFiles
             ) else {
                 throw Error.failedToEnumerateFolder(folder)
@@ -481,7 +541,9 @@ extension S3FileTransferManager {
                 // get modification data and append along with file name
                 let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
                 guard let modificationDate = attributes[.modificationDate] as? Date else { continue }
-                files.append(.init(name: file.path, modificationDate: modificationDate))
+                guard let size = attributes[.size] as? NSNumber else { continue }
+                let file = FileDescriptor(name: file.path, modificationDate: modificationDate, size: size.intValue)
+                files.append(file)
             }
             return files
         }
