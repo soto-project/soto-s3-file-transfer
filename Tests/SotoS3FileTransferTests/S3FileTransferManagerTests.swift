@@ -24,7 +24,7 @@ final class S3FileTransferManagerTests: XCTestCase {
 
     override class func setUp() {
         self.client = AWSClient(httpClientProvider: .createNew)
-        self.s3 = S3(client: self.client, region: .euwest1) // .with(middlewares: [AWSLoggingMiddleware()])
+        self.s3 = S3(client: self.client, region: .euwest1).with(middlewares: [AWSLoggingMiddleware()])
         self.s3FileTransfer = .init(s3: self.s3, threadPoolProvider: .createNew, logger: Logger(label: "S3TransferTests"))
 
         XCTAssertNoThrow(try FileManager.default.createDirectory(atPath: tempFolder, withIntermediateDirectories: false))
@@ -85,6 +85,21 @@ final class S3FileTransferManagerTests: XCTestCase {
 
         var buffer2: Data?
         XCTAssertNoThrow(try buffer2 = Data(contentsOf: URL(fileURLWithPath: filename2)))
+        XCTAssertEqual(buffer, buffer2)
+    }
+
+    func testURLUpload() {
+        let filename = "\(Self.tempFolder)/\(#function)"
+
+        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: URL(string: "https://soto.codes")!, to: S3File(bucket: Self.bucketName, key: "testURLUpload")).wait())
+        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: S3File(bucket: Self.bucketName, key: "testURLUpload"), to: filename) { print($0) }.wait())
+
+        defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename)) }
+
+        var buffer: Data?
+        XCTAssertNoThrow(try buffer = Data(contentsOf: URL(string: "https://soto.codes")!))
+        var buffer2: Data?
+        XCTAssertNoThrow(try buffer2 = Data(contentsOf: URL(fileURLWithPath: filename)))
         XCTAssertEqual(buffer, buffer2)
     }
 

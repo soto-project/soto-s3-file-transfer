@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+import AsyncHTTPClient
 import Foundation
 import Logging
 import NIO
@@ -29,12 +30,15 @@ public struct S3FileTransferManager {
         let multipartPartSize: Int
         /// maximum number of uploads/downloads running concurrently
         let maxConcurrentTasks: Int
+        /// url download chunk size
+        let urlDownloadChunkSize: Int
 
         public init(
             cancelOnError: Bool = true,
             multipartThreshold: Int = 8 * 1024 * 1024,
             multipartPartSize: Int = 8 * 1024 * 1024,
-            maxConcurrentTasks: Int = 4
+            maxConcurrentTasks: Int = 4,
+            urlDownloadChunkSize: Int = 32*1024
         ) {
             precondition(multipartThreshold >= 5 * 1024 * 1024, "Multipart upload threshold is required to be greater than 5MB")
             precondition(multipartThreshold >= multipartPartSize, "Multipart upload threshold is required to be greater than or equal to the multipart part size")
@@ -42,6 +46,7 @@ public struct S3FileTransferManager {
             self.multipartThreshold = multipartThreshold
             self.multipartPartSize = multipartPartSize
             self.maxConcurrentTasks = maxConcurrentTasks
+            self.urlDownloadChunkSize = urlDownloadChunkSize
         }
     }
 
@@ -137,6 +142,26 @@ public struct S3FileTransferManager {
                     return self.s3.putObject(request, logger: logger, on: eventLoop).map { _ in }.closeFileHandle(fileHandle)
                 }
             }
+    }
+
+    /// Copy from URL to S3 file
+    ///
+    /// Currently this will load the whole url into memory before uploading to S3
+    /// - Parameters:
+    ///   - url: url
+    ///   - to: s3 file
+    ///   - options: put options
+    /// - Returns: EventLoopFuture fulfilled when operation is complete
+    public func copy(from url: URL, to: S3File, options: PutOptions = .init()) -> EventLoopFuture<Void> {
+        self.logger.info("Copy from: \(url) to \(to)")
+        let eventLoop = self.s3.eventLoopGroup.next()
+        do {
+            let data = try Data(contentsOf: url)
+            let request = S3.PutObjectRequest(body: .data(data), bucket: to.bucket, key: to.key, options: options)
+            return self.s3.putObject(request, logger: logger, on: eventLoop).map { _ in }
+        } catch {
+            return eventLoop.makeFailedFuture(error)
+        }
     }
 
     /// Copy from S3 file, to local file
