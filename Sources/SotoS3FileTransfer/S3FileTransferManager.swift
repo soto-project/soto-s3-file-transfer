@@ -303,9 +303,9 @@ public struct S3FileTransferManager {
                 transfers.forEach { transfer in
                     taskQueue.submitTask {
                         self.copy(from: transfer.from.file, to: transfer.to, options: options) {
-                            try folderProgress.updateProgress(transfer.from.file.name, progress: $0)
+                            try folderProgress.updateProgress(transfer.from.file.key, progress: $0)
                         }.map { _ in
-                            folderProgress.setFileUploaded(transfer.from.file.name)
+                            folderProgress.setFileUploaded(transfer.from.file.key)
                         }
                     }
                 }
@@ -421,9 +421,9 @@ public struct S3FileTransferManager {
                 transfers.forEach { transfer in
                     taskQueue.submitTask {
                         self.copy(from: transfer.from.file, to: transfer.to, options: options) {
-                            try folderProgress.updateProgress(transfer.from.file.name, progress: $0)
+                            try folderProgress.updateProgress(transfer.from.file.key, progress: $0)
                         }.map { _ in
-                            folderProgress.setFileUploaded(transfer.from.file.name)
+                            folderProgress.setFileUploaded(transfer.from.file.key)
                         }
                     }
                 }

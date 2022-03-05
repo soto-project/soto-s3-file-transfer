@@ -26,7 +26,7 @@ extension S3FileTransferManager {
 
         init(_ s3Files: [S3FileDescriptor], progress: @escaping (Double) throws -> Void = { _ in }) {
             self.lock = Lock()
-            self.sizes = .init(s3Files.map { (key: $0.file.name, value: UInt64($0.size)) }) { first, _ in first }
+            self.sizes = .init(s3Files.map { (key: $0.file.key, value: UInt64($0.size)) }) { first, _ in first }
             self.totalSize = self.sizes.values.reduce(UInt64(0), +)
             self.uploadedSize = 0
             self.currentUploadingSizes = [:]
