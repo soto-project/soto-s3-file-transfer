@@ -53,15 +53,15 @@ extension S3FileTransferManager {
         /// The server-side encryption algorithm used when storing this object in Amazon S3 (for example, AES256, aws:kms).
         public let serverSideEncryption: S3.ServerSideEncryption?
         /// Specifies the algorithm to use to when encrypting the object (for example, AES256).
-        public let sSECustomerAlgorithm: String?
+        public let sseCustomerAlgorithm: String?
         /// Specifies the customer-provided encryption key for Amazon S3 to use in encrypting data. This value is used to store the object and then it is discarded; Amazon S3 does not store the encryption key. The key must be appropriate for use with the algorithm specified in the x-amz-server-side-encryption-customer-algorithm header.
-        public let sSECustomerKey: String?
+        public let sseCustomerKey: String?
         /// Specifies the 128-bit MD5 digest of the encryption key according to RFC 1321. Amazon S3 uses this header for a message integrity check to ensure that the encryption key was transmitted without error.
-        public let sSECustomerKeyMD5: String?
+        public let sseCustomerKeyMD5: String?
         /// Specifies the AWS KMS Encryption Context to use for object encryption. The value of this header is a base64-encoded UTF-8 string holding JSON with the encryption context key-value pairs.
-        public let sSEKMSEncryptionContext: String?
+        public let ssekmsEncryptionContext: String?
         /// If x-amz-server-side-encryption is present and has the value of aws:kms, this header specifies the ID of the AWS Key Management Service (AWS KMS) symmetrical customer managed customer master key (CMK) that was used for the object.  If the value of x-amz-server-side-encryption is aws:kms, this header specifies the ID of the symmetric customer managed AWS KMS CMK that will be used for the object. If you specify x-amz-server-side-encryption:aws:kms, but do not provide x-amz-server-side-encryption-aws-kms-key-id, Amazon S3 uses the AWS managed CMK in AWS to protect the data.
-        public let sSEKMSKeyId: String?
+        public let ssekmsKeyId: String?
         /// By default, Amazon S3 uses the STANDARD Storage Class to store newly created objects. The STANDARD storage class provides high durability and high availability. Depending on performance needs, you can specify a different Storage Class. Amazon S3 on Outposts only uses the OUTPOSTS Storage Class. For more information, see Storage Classes in the Amazon S3 Service Developer Guide.
         public let storageClass: S3.StorageClass?
         /// The tag-set for the object. The tag-set must be encoded as URL Query parameters. (For example, "Key1=Value1")
@@ -69,7 +69,7 @@ extension S3FileTransferManager {
         /// If the bucket is configured as a website, redirects requests for this object to another object in the same bucket or to an external URL. Amazon S3 stores the value of this header in the object metadata. For information about object metadata, see Object Key and Metadata. In the following example, the request header sets the redirect to an object (anotherPage.html) in the same bucket:  x-amz-website-redirect-location: /anotherPage.html  In the following example, the request header sets the object redirect to another website:  x-amz-website-redirect-location: http://www.example.com/  For more information about website hosting in Amazon S3, see Hosting Websites on Amazon S3 and How to Configure Website Page Redirects.
         public let websiteRedirectLocation: String?
 
-        public init(acl: S3.ObjectCannedACL? = nil, cacheControl: String? = nil, contentDisposition: String? = nil, contentEncoding: String? = nil, contentLanguage: String? = nil, contentType: String? = nil, expectedBucketOwner: String? = nil, expires: Date? = nil, grantFullControl: String? = nil, grantRead: String? = nil, grantReadACP: String? = nil, grantWriteACP: String? = nil, metadata: [String: String]? = nil, objectLockLegalHoldStatus: S3.ObjectLockLegalHoldStatus? = nil, objectLockMode: S3.ObjectLockMode? = nil, objectLockRetainUntilDate: Date? = nil, requestPayer: S3.RequestPayer? = nil, serverSideEncryption: S3.ServerSideEncryption? = nil, sSECustomerAlgorithm: String? = nil, sSECustomerKey: String? = nil, sSECustomerKeyMD5: String? = nil, sSEKMSEncryptionContext: String? = nil, sSEKMSKeyId: String? = nil, storageClass: S3.StorageClass? = nil, tagging: String? = nil, websiteRedirectLocation: String? = nil) {
+        public init(acl: S3.ObjectCannedACL? = nil, cacheControl: String? = nil, contentDisposition: String? = nil, contentEncoding: String? = nil, contentLanguage: String? = nil, contentType: String? = nil, expectedBucketOwner: String? = nil, expires: Date? = nil, grantFullControl: String? = nil, grantRead: String? = nil, grantReadACP: String? = nil, grantWriteACP: String? = nil, metadata: [String: String]? = nil, objectLockLegalHoldStatus: S3.ObjectLockLegalHoldStatus? = nil, objectLockMode: S3.ObjectLockMode? = nil, objectLockRetainUntilDate: Date? = nil, requestPayer: S3.RequestPayer? = nil, serverSideEncryption: S3.ServerSideEncryption? = nil, sseCustomerAlgorithm: String? = nil, sseCustomerKey: String? = nil, sseCustomerKeyMD5: String? = nil, ssekmsEncryptionContext: String? = nil, ssekmsKeyId: String? = nil, storageClass: S3.StorageClass? = nil, tagging: String? = nil, websiteRedirectLocation: String? = nil) {
             self.acl = acl
             self.cacheControl = cacheControl
             self.contentDisposition = contentDisposition
@@ -88,11 +88,11 @@ extension S3FileTransferManager {
             self.objectLockRetainUntilDate = objectLockRetainUntilDate
             self.requestPayer = requestPayer
             self.serverSideEncryption = serverSideEncryption
-            self.sSECustomerAlgorithm = sSECustomerAlgorithm
-            self.sSECustomerKey = sSECustomerKey
-            self.sSECustomerKeyMD5 = sSECustomerKeyMD5
-            self.sSEKMSEncryptionContext = sSEKMSEncryptionContext
-            self.sSEKMSKeyId = sSEKMSKeyId
+            self.sseCustomerAlgorithm = sseCustomerAlgorithm
+            self.sseCustomerKey = sseCustomerKey
+            self.sseCustomerKeyMD5 = sseCustomerKeyMD5
+            self.ssekmsEncryptionContext = ssekmsEncryptionContext
+            self.ssekmsKeyId = ssekmsKeyId
             self.storageClass = storageClass
             self.tagging = tagging
             self.websiteRedirectLocation = websiteRedirectLocation
@@ -112,27 +112,27 @@ extension S3FileTransferManager {
         public let ifUnmodifiedSince: Date?
         public let requestPayer: S3.RequestPayer?
         /// Specifies the algorithm to use to when encrypting the object (for example, AES256).
-        public let sSECustomerAlgorithm: String?
+        public let sseCustomerAlgorithm: String?
         /// Specifies the customer-provided encryption key for Amazon S3 to use in encrypting data. This value is used to store the object and then it is discarded; Amazon S3 does not store the encryption key. The key must be appropriate for use with the algorithm specified in the x-amz-server-side-encryption-customer-algorithm header.
-        public let sSECustomerKey: String?
+        public let sseCustomerKey: String?
         /// Specifies the 128-bit MD5 digest of the encryption key according to RFC 1321. Amazon S3 uses this header for a message integrity check to ensure that the encryption key was transmitted without error.
-        public let sSECustomerKeyMD5: String?
+        public let sseCustomerKeyMD5: String?
         /// VersionId used to reference a specific version of the object.
         public let versionId: String?
 
         /// Ignore file folder clashes when downloading folders. When set to true the file is not downloaded
         public let ignoreFileFolderClashes: Bool
 
-        public init(expectedBucketOwner: String? = nil, ifMatch: String? = nil, ifModifiedSince: Date? = nil, ifNoneMatch: String? = nil, ifUnmodifiedSince: Date? = nil, requestPayer: S3.RequestPayer? = nil, sSECustomerAlgorithm: String? = nil, sSECustomerKey: String? = nil, sSECustomerKeyMD5: String? = nil, versionId: String? = nil, ignoreFileFolderClashes: Bool = false) {
+        public init(expectedBucketOwner: String? = nil, ifMatch: String? = nil, ifModifiedSince: Date? = nil, ifNoneMatch: String? = nil, ifUnmodifiedSince: Date? = nil, requestPayer: S3.RequestPayer? = nil, sseCustomerAlgorithm: String? = nil, sseCustomerKey: String? = nil, sseCustomerKeyMD5: String? = nil, versionId: String? = nil, ignoreFileFolderClashes: Bool = false) {
             self.expectedBucketOwner = expectedBucketOwner
             self.ifMatch = ifMatch
             self.ifModifiedSince = ifModifiedSince
             self.ifNoneMatch = ifNoneMatch
             self.ifUnmodifiedSince = ifUnmodifiedSince
             self.requestPayer = requestPayer
-            self.sSECustomerAlgorithm = sSECustomerAlgorithm
-            self.sSECustomerKey = sSECustomerKey
-            self.sSECustomerKeyMD5 = sSECustomerKeyMD5
+            self.sseCustomerAlgorithm = sseCustomerAlgorithm
+            self.sseCustomerKey = sseCustomerKey
+            self.sseCustomerKeyMD5 = sseCustomerKeyMD5
             self.versionId = versionId
 
             self.ignoreFileFolderClashes = ignoreFileFolderClashes
@@ -166,11 +166,11 @@ extension S3.PutObjectRequest {
             objectLockRetainUntilDate: options.objectLockRetainUntilDate,
             requestPayer: options.requestPayer,
             serverSideEncryption: options.serverSideEncryption,
-            sSECustomerAlgorithm: options.sSECustomerAlgorithm,
-            sSECustomerKey: options.sSECustomerKey,
-            sSECustomerKeyMD5: options.sSECustomerKeyMD5,
-            sSEKMSEncryptionContext: options.sSEKMSEncryptionContext,
-            sSEKMSKeyId: options.sSEKMSKeyId,
+            sseCustomerAlgorithm: options.sseCustomerAlgorithm,
+            sseCustomerKey: options.sseCustomerKey,
+            sseCustomerKeyMD5: options.sseCustomerKeyMD5,
+            ssekmsEncryptionContext: options.ssekmsEncryptionContext,
+            ssekmsKeyId: options.ssekmsKeyId,
             storageClass: options.storageClass,
             tagging: options.tagging,
             websiteRedirectLocation: options.websiteRedirectLocation
@@ -201,11 +201,11 @@ extension S3.CreateMultipartUploadRequest {
             objectLockRetainUntilDate: options.objectLockRetainUntilDate,
             requestPayer: options.requestPayer,
             serverSideEncryption: options.serverSideEncryption,
-            sSECustomerAlgorithm: options.sSECustomerAlgorithm,
-            sSECustomerKey: options.sSECustomerKey,
-            sSECustomerKeyMD5: options.sSECustomerKeyMD5,
-            sSEKMSEncryptionContext: options.sSEKMSEncryptionContext,
-            sSEKMSKeyId: options.sSEKMSKeyId,
+            sseCustomerAlgorithm: options.sseCustomerAlgorithm,
+            sseCustomerKey: options.sseCustomerKey,
+            sseCustomerKeyMD5: options.sseCustomerKeyMD5,
+            ssekmsEncryptionContext: options.ssekmsEncryptionContext,
+            ssekmsKeyId: options.ssekmsKeyId,
             storageClass: options.storageClass,
             tagging: options.tagging,
             websiteRedirectLocation: options.websiteRedirectLocation
@@ -237,11 +237,11 @@ extension S3.CopyObjectRequest {
             objectLockRetainUntilDate: options.objectLockRetainUntilDate,
             requestPayer: options.requestPayer,
             serverSideEncryption: options.serverSideEncryption,
-            sSECustomerAlgorithm: options.sSECustomerAlgorithm,
-            sSECustomerKey: options.sSECustomerKey,
-            sSECustomerKeyMD5: options.sSECustomerKeyMD5,
-            sSEKMSEncryptionContext: options.sSEKMSEncryptionContext,
-            sSEKMSKeyId: options.sSEKMSKeyId,
+            sseCustomerAlgorithm: options.sseCustomerAlgorithm,
+            sseCustomerKey: options.sseCustomerKey,
+            sseCustomerKeyMD5: options.sseCustomerKeyMD5,
+            ssekmsEncryptionContext: options.ssekmsEncryptionContext,
+            ssekmsKeyId: options.ssekmsKeyId,
             storageClass: options.storageClass,
             tagging: options.tagging,
             websiteRedirectLocation: options.websiteRedirectLocation
@@ -260,9 +260,9 @@ extension S3.GetObjectRequest {
             ifUnmodifiedSince: options.ifUnmodifiedSince,
             key: key,
             requestPayer: options.requestPayer,
-            sSECustomerAlgorithm: options.sSECustomerAlgorithm,
-            sSECustomerKey: options.sSECustomerKey,
-            sSECustomerKeyMD5: options.sSECustomerKeyMD5,
+            sseCustomerAlgorithm: options.sseCustomerAlgorithm,
+            sseCustomerKey: options.sseCustomerKey,
+            sseCustomerKeyMD5: options.sseCustomerKeyMD5,
             versionId: options.versionId
         )
     }
