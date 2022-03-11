@@ -265,7 +265,8 @@ public struct S3FileTransferManager {
         return listFiles(in: folder)
             .flatMap { files in
                 let taskQueue = TaskQueue<Void>(maxConcurrentTasks: configuration.maxConcurrentTasks, on: eventLoop)
-                let transfers = Self.targetFiles(files: files, from: folder, to: s3Folder)
+                let folderResolved = URL(fileURLWithPath: folder).standardizedFileURL.resolvingSymlinksInPath()
+                let transfers = Self.targetFiles(files: files, from: folderResolved.path, to: s3Folder)
                 let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
                 transfers.forEach { transfer in
                     taskQueue.submitTask {
@@ -353,7 +354,8 @@ public struct S3FileTransferManager {
         return listFiles(in: folder).and(listFiles(in: s3Folder))
             .flatMap { files, s3Files in
                 let taskQueue = TaskQueue<Void>(maxConcurrentTasks: configuration.maxConcurrentTasks, on: eventLoop)
-                let targetFiles = Self.targetFiles(files: files, from: folder, to: s3Folder)
+                let folderResolved = URL(fileURLWithPath: folder).standardizedFileURL.resolvingSymlinksInPath()
+                let targetFiles = Self.targetFiles(files: files, from: folderResolved.path, to: s3Folder)
                 let transfers = targetFiles.compactMap { transfer -> (from: FileDescriptor, to: S3File)? in
                     // does file exist on S3
                     guard let s3File = s3Files.first(where: { $0.file.key == transfer.to.key }) else { return transfer }
@@ -541,17 +543,17 @@ extension S3FileTransferManager {
                 throw Error.failedToEnumerateFolder(folder)
             }
             while let file = fileEnumerator.nextObject() as? URL {
-                let path = file.path
+                let fileResolved = file.resolvingSymlinksInPath()
                 var isDirectory: ObjCBool = false
                 // ignore if it is a directory
-                _ = FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+                _ = FileManager.default.fileExists(atPath: fileResolved.path, isDirectory: &isDirectory)
                 guard !isDirectory.boolValue else { continue }
                 // get modification data and append along with file name
-                let attributes = try FileManager.default.attributesOfItem(atPath: file.path)
+                let attributes = try FileManager.default.attributesOfItem(atPath: fileResolved.path)
                 guard let modificationDate = attributes[.modificationDate] as? Date else { continue }
                 guard let size = attributes[.size] as? NSNumber else { continue }
-                let file = FileDescriptor(name: file.path, modificationDate: modificationDate, size: size.intValue)
-                files.append(file)
+                let fileDescriptor = FileDescriptor(name: fileResolved.path, modificationDate: modificationDate, size: size.intValue)
+                files.append(fileDescriptor)
             }
             return files
         }
