@@ -21,14 +21,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        tag: ['5.3', '5.4', '5.5']
+        image:
+          - swift:5.4
+          - swift:5.5
+          - swift:5.6
     container:
-      image: swift:${{ matrix.tag }}
+      image: ${{ matrix.image }}
     steps:
-    - name: Install dependencies
-      run: |
-        apt-get update -qq
-        apt-get install -q -y tzdata zlib1g-dev
     - name: Checkout
       uses: actions/checkout@v2
     - name: Test
