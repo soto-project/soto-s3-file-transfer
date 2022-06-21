@@ -160,10 +160,8 @@ public struct S3FileTransferManager {
 
         // check for existence of file and get its filesize so we can calculate progress
         return self.s3.headObject(.init(bucket: from.bucket, key: from.key), logger: self.logger, on: eventLoop).flatMapErrorThrowing { error in
-            if let error = error as? AWSRawError {
-                if error.context.responseCode == .notFound {
-                    throw Error.fileDoesNotExist(String(describing: from))
-                }
+            if let error = error as? S3ErrorType, error == .notFound {
+                throw Error.fileDoesNotExist(String(describing: from))
             }
             throw error
         }.flatMap { response in
@@ -241,10 +239,8 @@ public struct S3FileTransferManager {
             }
         }
         .flatMapErrorThrowing { error in
-            if let error = error as? AWSRawError {
-                if error.context.responseCode == .notFound {
-                    throw Error.fileDoesNotExist(String(describing: from))
-                }
+            if let error = error as? S3ErrorType, error == .notFound {
+                throw Error.fileDoesNotExist(String(describing: from))
             }
             throw error
         }

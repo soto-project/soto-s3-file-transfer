@@ -17,18 +17,19 @@ import SotoS3
 import XCTest
 
 final class S3FileTransferManagerTests: XCTestCase {
-    static let bucketName = "soto-transfermanagertests"
+    static let bucketName = generateResourceName("soto-transfermanagertests")
     static var client: AWSClient!
     static var s3: S3!
     static var s3FileTransfer: S3FileTransferManager!
 
     override class func setUp() {
         self.client = AWSClient(httpClientProvider: .createNew)
-        self.s3 = S3(client: self.client, region: .euwest1) // .with(middlewares: [AWSLoggingMiddleware()])
+        self.s3 = S3(client: self.client, region: .euwest1).with(middlewares: [AWSLoggingMiddleware()])
         self.s3FileTransfer = .init(s3: self.s3, threadPoolProvider: .createNew, logger: Logger(label: "S3TransferTests"))
 
         XCTAssertNoThrow(try FileManager.default.createDirectory(atPath: self.tempFolder, withIntermediateDirectories: false))
         XCTAssertNoThrow(try self.s3.createBucket(.init(bucket: self.bucketName)).wait())
+        XCTAssertNoThrow(try self.s3.waitUntilBucketExists(.init(bucket: self.bucketName)).wait())
     }
 
     override class func tearDown() {
@@ -246,11 +247,12 @@ final class S3FileTransferManagerTests: XCTestCase {
         XCTAssertNoThrow(try FileManager.default.removeItem(atPath: Self.tempFolder + "/Tests2"))
     }
 
-    func testDeleteFolder() {
+    func testDeleteFolder() throws {
         let folder = S3Folder(url: "s3://\(Self.bucketName)/testDeleteFolder")!
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: Self.rootPath + "/Tests", to: folder, delete: true).wait())
         var files: [S3FileTransferManager.S3FileDescriptor]?
         XCTAssertNoThrow(files = try Self.s3FileTransfer.listFiles(in: folder).wait())
+        files = try XCTUnwrap(files);
         XCTAssertTrue(files!.count > 0)
         XCTAssertNoThrow(try Self.s3FileTransfer.delete(folder).wait())
         XCTAssertNoThrow(files = try Self.s3FileTransfer.listFiles(in: folder).wait())
@@ -358,5 +360,11 @@ final class S3FileTransferManagerTests: XCTestCase {
             data[i] = UInt8.random(in: 0...255)
         }
         return data
+    }
+
+    static func generateResourceName(_ prefix: String) -> String {
+        let suffix = String(Int.random(in: Int.min..<Int.max), radix: 16)
+
+        return (prefix + suffix).lowercased()
     }
 }
