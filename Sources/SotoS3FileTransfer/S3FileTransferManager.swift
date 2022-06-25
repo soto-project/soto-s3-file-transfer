@@ -2,7 +2,7 @@
 //
 // This source file is part of the Soto for AWS open source project
 //
-// Copyright (c) 2020-2021 the Soto project authors
+// Copyright (c) 2020-2022 the Soto project authors
 // Licensed under Apache License v2.0
 //
 // See LICENSE.txt for license information
@@ -99,7 +99,7 @@ public struct S3FileTransferManager {
     /// Shutdown S3 Transfer manager. Delete thread pool, if one was created by manager
     public func syncShutdown() throws {
         if case .createNew = self.threadPoolProvider {
-            threadPool.shutdownGracefully { _ in }
+            try threadPool.syncShutdownGracefully()
         }
     }
 
@@ -109,7 +109,12 @@ public struct S3FileTransferManager {
     ///   - to: S3 file
     ///   - progress: progress function, updated with value from 0 to 1 based on how much we have uploaded
     /// - Returns: EventLoopFuture fulfilled when operation is complete
-    public func copy(from: String, to: S3File, options: PutOptions = .init(), progress: @escaping (Double) throws -> Void = { _ in }) -> EventLoopFuture<Void> {
+    public func copy(
+        from: String,
+        to: S3File,
+        options: PutOptions = .init(),
+        progress: @escaping (Double) throws -> Void = { _ in }
+    ) -> EventLoopFuture<Void> {
         self.logger.info("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
         return self.fileIO.openFile(path: from, eventLoop: eventLoop)
@@ -152,7 +157,12 @@ public struct S3FileTransferManager {
     ///   - to: local filename
     ///   - progress: progress function, updated with value from 0 to 1 based on how much we have uploaded
     /// - Returns: EventLoopFuture fulfilled when operation is complete
-    public func copy(from: S3File, to: String, options: GetOptions = .init(), progress: @escaping (Double) throws -> Void = { _ in }) -> EventLoopFuture<Void> {
+    public func copy(
+        from: S3File,
+        to: String,
+        options: GetOptions = .init(),
+        progress: @escaping (Double) throws -> Void = { _ in }
+    ) -> EventLoopFuture<Void> {
         self.logger.info("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
         var bytesDownloaded = 0
@@ -216,7 +226,12 @@ public struct S3FileTransferManager {
     ///   - fileSize: Size of file to copy. If you don't provide this then function will call `headObject` to ascertain this
     ///   - options: Options while copying
     /// - Returns: EventLoopFuture fulfilled when operation is complete
-    public func copy(from: S3File, to: S3File, fileSize: Int? = nil, options: CopyOptions = .init()) -> EventLoopFuture<Void> {
+    public func copy(
+        from: S3File,
+        to: S3File,
+        fileSize: Int? = nil,
+        options: CopyOptions = .init()
+    ) -> EventLoopFuture<Void> {
         self.logger.info("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
         let copySource = "/\(from.bucket)/\(from.key)".addingPercentEncoding(withAllowedCharacters: Self.pathAllowedCharacters)!
@@ -317,7 +332,11 @@ public struct S3FileTransferManager {
     ///   - from: Path to source S3 folder
     ///   - to: Path to destination S3 folder
     /// - Returns: EventLoopFuture fulfilled when operation is complete
-    public func copy(from srcFolder: S3Folder, to destFolder: S3Folder, options: CopyOptions = .init()) -> EventLoopFuture<Void> {
+    public func copy(
+        from srcFolder: S3Folder,
+        to destFolder: S3Folder,
+        options: CopyOptions = .init()
+    ) -> EventLoopFuture<Void> {
         let eventLoop = self.s3.eventLoopGroup.next()
         return listFiles(in: srcFolder)
             .flatMap { files in
@@ -330,7 +349,9 @@ public struct S3FileTransferManager {
             }
     }
 
-    /// Sync from local folder, to S3 folder. Copies files across unless the file already exists in S3 folder, or file in S3 is newer. Added flag to
+    /// Sync from local folder, to S3 folder.
+    ///
+    /// Copies files across unless the file already exists in S3 folder, or file in S3 is newer. Added flag to
     /// delete files on S3 that don't exist locally
     ///
     /// - Parameters:
@@ -386,7 +407,9 @@ public struct S3FileTransferManager {
             }
     }
 
-    /// Sync from S3 folder, to local folder. Download files from S3 unless the file already exists in local folder, or local file is newer. Added flag to
+    /// Sync from S3 folder, to local folder.
+    ///
+    /// Download files from S3 unless the file already exists in local folder, or local file is newer. Added flag to
     /// delete files locally that don't exist in S3.
     ///
     /// - Parameters:
@@ -442,7 +465,9 @@ public struct S3FileTransferManager {
             }
     }
 
-    /// Sync from S3 folder, to another S3 folder. Copy files from S3 folder unless the file already exists in destination folder, or destination file is newer. Added flag to
+    /// Sync from S3 folder, to another S3 folder.
+    ///
+    /// Copy files from S3 folder unless the file already exists in destination folder, or destination file is newer. Added flag to
     /// delete files from destination folder that don't exist in source folder.
     ///
     /// - Parameters:
@@ -450,7 +475,12 @@ public struct S3FileTransferManager {
     ///   - to: Local folder
     ///   - delete: Should we delete files locally that don't exists in S3
     /// - Returns: EventLoopFuture fulfilled when operation is complete
-    public func sync(from srcFolder: S3Folder, to destFolder: S3Folder, delete: Bool, options: CopyOptions = .init()) -> EventLoopFuture<Void> {
+    public func sync(
+        from srcFolder: S3Folder,
+        to destFolder: S3Folder,
+        delete: Bool,
+        options: CopyOptions = .init()
+    ) -> EventLoopFuture<Void> {
         let eventLoop = self.s3.eventLoopGroup.next()
 
         return listFiles(in: srcFolder).and(listFiles(in: destFolder))
@@ -583,7 +613,8 @@ extension S3FileTransferManager {
             return try result.compactMap {
                 let prevFilename = $0.file.key
                 if filename.hasPrefix(prevFilename),
-                   (prevFilename.last == "/" || filename.dropFirst(prevFilename.count).first == "/") {
+                   prevFilename.last == "/" || filename.dropFirst(prevFilename.count).first == "/"
+                {
                     if ignoreClashes {
                         return nil
                     } else {
