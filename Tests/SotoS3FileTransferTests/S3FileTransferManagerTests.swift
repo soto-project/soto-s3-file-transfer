@@ -50,6 +50,7 @@ final class S3FileTransferManagerTests: XCTestCase {
             return s3.deleteBucket(request).map { _ in }
         }
         XCTAssertNoThrow(try response.wait())
+        XCTAssertNoThrow(try self.s3FileTransfer.syncShutdown())
         XCTAssertNoThrow(try self.client.syncShutdown())
         XCTAssertNoThrow(try FileManager.default.removeItem(atPath: self.tempFolder))
     }
@@ -252,7 +253,7 @@ final class S3FileTransferManagerTests: XCTestCase {
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: Self.rootPath + "/Tests", to: folder, delete: true).wait())
         var files: [S3FileTransferManager.S3FileDescriptor]?
         XCTAssertNoThrow(files = try Self.s3FileTransfer.listFiles(in: folder).wait())
-        files = try XCTUnwrap(files);
+        files = try XCTUnwrap(files)
         XCTAssertTrue(files!.count > 0)
         XCTAssertNoThrow(try Self.s3FileTransfer.delete(folder).wait())
         XCTAssertNoThrow(files = try Self.s3FileTransfer.listFiles(in: folder).wait())

@@ -15,10 +15,11 @@
 import Foundation
 import Logging
 import NIO
+import NIOConcurrencyHelpers
 import SotoS3
 
 /// S3 Transfer manager. Transfers files/folders back and forth between S3 and your local file system
-public struct S3FileTransferManager {
+public class S3FileTransferManager {
     /// Configuration for S3 Transfer Manager
     public struct Configuration {
         /// Cancel operations as soon as an error is found. Otherwise the operation will be attempt to finish all transfers
@@ -67,7 +68,10 @@ public struct S3FileTransferManager {
     public let configuration: Configuration
     /// Logger
     public let logger: Logger
+    /// how class created its thread pool
     let threadPoolProvider: S3.ThreadPoolProvider
+    /// Have we shutdown the Manager
+    internal let isShutdown = NIOAtomic<Bool>.makeAtomic(value: false)
 
     /// Initialize S3 Transfer manager.
     /// - Parameters:
@@ -96,7 +100,20 @@ public struct S3FileTransferManager {
         self.logger = logger
     }
 
-    /// Shutdown S3 Transfer manager. Delete thread pool, if one was created by manager
+    deinit {
+        // if class owned its own thread pool then makes sure it has been deleted
+        if case .createNew = self.threadPoolProvider {
+            assert(
+                self.isShutdown.load(),
+                "S3FileTransferManager not shut down before the deinit. Please call S3FileTransferManager.syncShutdown() when no longer needed."
+            )
+        }
+    }
+
+    /// Shutdown S3 Transfer manager.
+    ///
+    /// If a thread pool was not passed at initialisation then it is required that `syncShutdown` is called
+    /// prior to deleting the class so the thread pool can be shutdown.
     public func syncShutdown() throws {
         if case .createNew = self.threadPoolProvider {
             threadPool.shutdownGracefully { _ in }
@@ -128,7 +145,7 @@ public struct S3FileTransferManager {
                         fileIO: self.fileIO,
                         uploadSize: fileSize,
                         abortOnFail: true,
-                        logger: logger,
+                        logger: self.logger,
                         on: eventLoop,
                         progress: progress
                     )
@@ -139,7 +156,7 @@ public struct S3FileTransferManager {
                         try progress(Double(downloaded) / Double(fileSize))
                     }
                     let request = S3.PutObjectRequest(body: payload, bucket: to.bucket, key: to.key, options: options)
-                    return self.s3.putObject(request, logger: logger, on: eventLoop)
+                    return self.s3.putObject(request, logger: self.logger, on: eventLoop)
                         .flatMapThrowing { _ in try? progress(1.0) }
                         .closeFileHandle(fileHandle)
                 }
@@ -198,7 +215,7 @@ public struct S3FileTransferManager {
             self.fileIO.openFile(path: filename, mode: .write, flags: .allowFileCreation(), eventLoop: eventLoop)
         }.flatMap { fileHandle -> EventLoopFuture<S3.GetObjectOutput> in
             let request = S3.GetObjectRequest(bucket: from.bucket, key: from.key, options: options)
-            return self.s3.getObjectStreaming(request, logger: logger, on: eventLoop) { byteBuffer, eventLoop in
+            return self.s3.getObjectStreaming(request, logger: self.logger, on: eventLoop) { byteBuffer, eventLoop in
                 let bufferSize = byteBuffer.readableBytes
                 return self.fileIO.write(fileHandle: fileHandle, buffer: byteBuffer, eventLoop: eventLoop).flatMapThrowing { _ in
                     bytesDownloaded += bufferSize
@@ -230,11 +247,11 @@ public struct S3FileTransferManager {
             fileSizeFuture = self.s3.headObject(headRequest, on: eventLoop).map { response in Int(response.contentLength!) }
         }
         return fileSizeFuture.flatMap { fileSize -> EventLoopFuture<Void> in
-            if fileSize > configuration.multipartThreshold {
-                return self.s3.multipartCopy(request, objectSize: fileSize, partSize: configuration.multipartPartSize)
+            if fileSize > self.configuration.multipartThreshold {
+                return self.s3.multipartCopy(request, objectSize: fileSize, partSize: self.configuration.multipartPartSize)
                     .map { _ in }
             } else {
-                return self.s3.copyObject(request, logger: logger)
+                return self.s3.copyObject(request, logger: self.logger)
                     .map { _ in }
             }
         }
@@ -260,7 +277,7 @@ public struct S3FileTransferManager {
         let eventLoop = self.s3.eventLoopGroup.next()
         return listFiles(in: folder)
             .flatMap { files in
-                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: configuration.maxConcurrentTasks, on: eventLoop)
+                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
                 let folderResolved = URL(fileURLWithPath: folder).standardizedFileURL.resolvingSymlinksInPath()
                 let transfers = Self.targetFiles(files: files, from: folderResolved.path, to: s3Folder)
                 let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
@@ -273,7 +290,7 @@ public struct S3FileTransferManager {
                         }
                     }
                 }
-                return complete(taskQueue: taskQueue).map { _ in
+                return self.complete(taskQueue: taskQueue).map { _ in
                     assert(folderProgress.finished == true)
                 }
             }
@@ -294,7 +311,7 @@ public struct S3FileTransferManager {
         return listFiles(in: s3Folder)
             .flatMapThrowing { try self.validateFileList($0, ignoreClashes: options.ignoreFileFolderClashes) }
             .flatMap { files in
-                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: configuration.maxConcurrentTasks, on: eventLoop)
+                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
                 let transfers = Self.targetFiles(files: files, from: s3Folder, to: folder)
                 let folderProgress = FolderUploadProgress(files, progress: progress)
                 transfers.forEach { transfer in
@@ -306,7 +323,7 @@ public struct S3FileTransferManager {
                         }
                     }
                 }
-                return complete(taskQueue: taskQueue).map { _ in
+                return self.complete(taskQueue: taskQueue).map { _ in
                     assert(folderProgress.finished == true)
                 }
             }
@@ -321,12 +338,12 @@ public struct S3FileTransferManager {
         let eventLoop = self.s3.eventLoopGroup.next()
         return listFiles(in: srcFolder)
             .flatMap { files in
-                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: configuration.maxConcurrentTasks, on: eventLoop)
+                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
                 let transfers = Self.targetFiles(files: files, from: srcFolder, to: destFolder)
                 transfers.forEach { transfer in
                     taskQueue.submitTask { self.copy(from: transfer.from.file, to: transfer.to, fileSize: transfer.from.size, options: options) }
                 }
-                return complete(taskQueue: taskQueue)
+                return self.complete(taskQueue: taskQueue)
             }
     }
 
@@ -349,7 +366,7 @@ public struct S3FileTransferManager {
 
         return listFiles(in: folder).and(listFiles(in: s3Folder))
             .flatMap { files, s3Files in
-                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: configuration.maxConcurrentTasks, on: eventLoop)
+                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
                 let folderResolved = URL(fileURLWithPath: folder).standardizedFileURL.resolvingSymlinksInPath()
                 let targetFiles = Self.targetFiles(files: files, from: folderResolved.path, to: s3Folder)
                 let transfers = targetFiles.compactMap { transfer -> (from: FileDescriptor, to: S3File)? in
@@ -380,7 +397,7 @@ public struct S3FileTransferManager {
                     }
                     deletions.forEach { deletion in taskQueue.submitTask { self.delete(deletion) } }
                 }
-                return complete(taskQueue: taskQueue).map { _ in
+                return self.complete(taskQueue: taskQueue).map { _ in
                     assert(folderProgress.finished == true)
                 }
             }
@@ -406,7 +423,7 @@ public struct S3FileTransferManager {
         return listFiles(in: folder)
             .and(listFiles(in: s3Folder).flatMapThrowing { try self.validateFileList($0, ignoreClashes: options.ignoreFileFolderClashes) })
             .flatMap { files, s3Files in
-                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: configuration.maxConcurrentTasks, on: eventLoop)
+                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
                 let targetFiles = Self.targetFiles(files: s3Files, from: s3Folder, to: folder)
                 let transfers = targetFiles.compactMap { transfer -> (from: S3FileDescriptor, to: String)? in
                     // does file exist locally
@@ -436,7 +453,7 @@ public struct S3FileTransferManager {
                     }
                     deletions.forEach { deletion in taskQueue.submitTask { self.delete(deletion) } }
                 }
-                return complete(taskQueue: taskQueue).map { _ in
+                return self.complete(taskQueue: taskQueue).map { _ in
                     assert(folderProgress.finished == true)
                 }
             }
@@ -455,7 +472,7 @@ public struct S3FileTransferManager {
 
         return listFiles(in: srcFolder).and(listFiles(in: destFolder))
             .flatMap { srcFiles, destFiles in
-                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: configuration.maxConcurrentTasks, on: eventLoop)
+                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
                 let targetFiles = Self.targetFiles(files: srcFiles, from: srcFolder, to: destFolder)
                 let transfers = targetFiles.compactMap { transfer -> (from: S3FileDescriptor, to: S3File)? in
                     // does file exist in destination folder
@@ -478,7 +495,7 @@ public struct S3FileTransferManager {
                     }
                     deletions.forEach { deletion in taskQueue.submitTask { self.delete(deletion) } }
                 }
-                return complete(taskQueue: taskQueue)
+                return self.complete(taskQueue: taskQueue)
             }
     }
 
@@ -493,9 +510,9 @@ public struct S3FileTransferManager {
         let eventLoop = self.s3.eventLoopGroup.next()
         return listFiles(in: s3Folder)
             .flatMap { files in
-                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: configuration.maxConcurrentTasks, on: eventLoop)
+                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
                 files.forEach { deletion in taskQueue.submitTask { self.delete(deletion.file) } }
-                return complete(taskQueue: taskQueue)
+                return self.complete(taskQueue: taskQueue)
             }
     }
 }
@@ -583,7 +600,8 @@ extension S3FileTransferManager {
             return try result.compactMap {
                 let prevFilename = $0.file.key
                 if filename.hasPrefix(prevFilename),
-                   (prevFilename.last == "/" || filename.dropFirst(prevFilename.count).first == "/") {
+                   prevFilename.last == "/" || filename.dropFirst(prevFilename.count).first == "/"
+                {
                     if ignoreClashes {
                         return nil
                     } else {
