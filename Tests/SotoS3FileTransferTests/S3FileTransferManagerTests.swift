@@ -24,7 +24,7 @@ final class S3FileTransferManagerTests: XCTestCase {
 
     override class func setUp() {
         self.client = AWSClient(httpClientProvider: .createNew)
-        self.s3 = S3(client: self.client, region: .euwest1).with(middlewares: [AWSLoggingMiddleware()])
+        self.s3 = S3(client: self.client, region: .euwest1).with(middlewares: [AWSLoggingMiddleware()], timeout: .seconds(30))
         self.s3FileTransfer = .init(s3: self.s3, threadPoolProvider: .createNew, logger: Logger(label: "S3TransferTests"))
 
         XCTAssertNoThrow(try FileManager.default.createDirectory(atPath: self.tempFolder, withIntermediateDirectories: false))
