@@ -117,6 +117,7 @@ public class S3FileTransferManager {
     public func syncShutdown() throws {
         if case .createNew = self.threadPoolProvider {
             try threadPool.syncShutdownGracefully()
+            self.isShutdown.store(true)
         }
     }
 
