@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+import Atomics
 import Foundation
 import Logging
 import NIO
@@ -71,7 +72,7 @@ public class S3FileTransferManager {
     /// how class created its thread pool
     let threadPoolProvider: S3.ThreadPoolProvider
     /// Have we shutdown the Manager
-    internal let isShutdown = NIOAtomic<Bool>.makeAtomic(value: false)
+    internal let isShutdown = ManagedAtomic(false) // <Bool>.makeAtomic(value: false)
 
     /// Initialize S3 Transfer manager.
     /// - Parameters:
@@ -104,7 +105,7 @@ public class S3FileTransferManager {
         // if class owned its own thread pool then makes sure it has been deleted
         if case .createNew = self.threadPoolProvider {
             assert(
-                self.isShutdown.load(),
+                self.isShutdown.load(ordering: .relaxed),
                 "S3FileTransferManager not shut down before the deinit. Please call S3FileTransferManager.syncShutdown() when no longer needed."
             )
         }
@@ -117,7 +118,7 @@ public class S3FileTransferManager {
     public func syncShutdown() throws {
         if case .createNew = self.threadPoolProvider {
             try threadPool.syncShutdownGracefully()
-            self.isShutdown.store(true)
+            self.isShutdown.store(true, ordering: .relaxed)
         }
     }
 
