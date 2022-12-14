@@ -12,6 +12,10 @@ let s3 = S3(client: client, region: .euwest1)
 let s3FileTransfer = S3FileTransferManager(s3: s3, threadPoolProvider: .createNew)
 ```
 
+## Shutdown
+
+Because `S3FileTransferManager` can hold a thread pool that requires explicit shutdown, it also requires explicit shutdown. Before the manager is deleted you need to call `S3FileTransferManager.syncShutdown` to ensure the thread pool has been shutdown correctly.
+
 ## Upload to S3
 
 Uploading files to S3 is done with one call. The call returns a [NIO](https://github.com/apple/swift-nio) EventLoopFuture which will be fulfilled with the response when the operation is finished.
