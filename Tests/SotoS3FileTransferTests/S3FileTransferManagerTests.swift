@@ -279,10 +279,13 @@ final class S3FileTransferManagerTests: S3TransferManagerXCTestCase {
                 }
             }.wait()
         } catch {
-            var localFiles: [S3FileTransferManager.FileDescriptor]?
-            XCTAssertNoThrow(localFiles = try s3FileTransfer.listFiles(in: localFolder).wait())
-            // check total file size for folder is different
-            XCTAssertNotEqual(localFiles?.map { $0.size }.reduce(0, +), originalFiles?.map { $0.size }.reduce(0, +))
+            // can't guarantee this check will work if only file with error is in download list
+            if s3FileTransfer.configuration.cancelOnError == true {
+                var localFiles: [S3FileTransferManager.FileDescriptor]?
+                XCTAssertNoThrow(localFiles = try s3FileTransfer.listFiles(in: localFolder).wait())
+                // check total file size for folder is different
+                XCTAssertNotEqual(localFiles?.map { $0.size }.reduce(0, +), originalFiles?.map { $0.size }.reduce(0, +))
+            }
             if let error = error as? S3FileTransferManager.Error, case .downloadFailed(_, let download) = error {
                 try? s3FileTransfer.resume(download: download).wait()
             }
