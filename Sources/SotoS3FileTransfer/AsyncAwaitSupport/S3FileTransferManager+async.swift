@@ -167,6 +167,25 @@ extension S3FileTransferManager {
         return try await self.sync(from: srcFolder, to: destFolder, delete: delete, options: options).get()
     }
 
+    /// Resume download from S3 that previously failed
+    ///
+    /// When a copy or sync to file system operation fails it will throw a
+    /// S3TransferManager.Error.downloadFailed error. This contains a `DownloadOperation`.
+    /// struct. You can resume the download by passing the struct to the this function.
+    ///
+    /// - Parameters:
+    ///   - download: Details of remaining downloads to perform
+    ///   - options: Download options
+    ///   - progress: Progress function
+    /// - Returns: EventLoopFuture fulfilled when operation is complete
+    public func resume(
+        download: DownloadOperation,
+        options: GetOptions = .init(),
+        progress: @escaping (Double) throws -> Void = { _ in }
+    ) async throws {
+        try await self.resume(download: download, options: options, progress: progress).get()
+    }
+
     /// delete a file on S3
     public func delete(_ file: S3File) async throws {
         try await self.delete(file).get()

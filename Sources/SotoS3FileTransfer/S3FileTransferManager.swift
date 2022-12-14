@@ -47,6 +47,8 @@ public class S3FileTransferManager {
         }
     }
 
+    /// List of file downloads to perform. This is return in a downloadFailed
+    /// error and can be passed to the resume function to resume the download
     public struct DownloadOperation {
         let transfers: [(from: S3FileDescriptor, to: String)]
     }
@@ -523,15 +525,16 @@ public class S3FileTransferManager {
             }
     }
 
-    /// Sync from S3 folder, to local folder.
+    /// Resume download from S3 that previously failed
     ///
-    /// Download files from S3 unless the file already exists in local folder, or local file is newer. Added flag to
-    /// delete files locally that don't exist in S3.
+    /// When a copy or sync to file system operation fails it will throw a
+    /// S3TransferManager.Error.downloadFailed error. This contains a `DownloadOperation`.
+    /// struct. You can resume the download by passing the struct to the this function.
     ///
     /// - Parameters:
-    ///   - from: Path to source S3 folder
-    ///   - to: Local folder
-    ///   - delete: Should we delete files locally that don't exists in S3
+    ///   - download: Details of remaining downloads to perform
+    ///   - options: Download options
+    ///   - progress: Progress function
     /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func resume(
         download: DownloadOperation,
