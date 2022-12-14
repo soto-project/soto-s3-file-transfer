@@ -47,6 +47,12 @@ public class S3FileTransferManager {
         }
     }
 
+    /// List of file downloads to perform. This is return in a downloadFailed
+    /// error and can be passed to the resume function to resume the download
+    public struct DownloadOperation {
+        let transfers: [(from: S3FileDescriptor, to: String)]
+    }
+
     /// Errors created by S3TransferManager
     public enum Error: Swift.Error {
         /// File you referenced doesn't exist
@@ -57,6 +63,8 @@ public class S3FileTransferManager {
         case failedToEnumerateFolder(String)
         /// Cannot download file from S3 as it is a folder on your local file system
         case fileFolderClash(String, String)
+        /// download failed
+        case downloadFailed(Swift.Error, DownloadOperation)
     }
 
     /// S3 service object
@@ -330,19 +338,12 @@ public class S3FileTransferManager {
             .flatMap { files in
                 let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
                 let transfers = Self.targetFiles(files: files, from: s3Folder, to: folder)
-                let folderProgress = FolderUploadProgress(files, progress: progress)
-                transfers.forEach { transfer in
-                    taskQueue.submitTask {
-                        self.copy(from: transfer.from.file, to: transfer.to, options: options) {
-                            try folderProgress.updateProgress(transfer.from.file.key, progress: $0)
-                        }.map { _ in
-                            folderProgress.setFileUploaded(transfer.from.file.key)
-                        }
-                    }
-                }
-                return self.complete(taskQueue: taskQueue).map { _ in
-                    assert(folderProgress.finished == true)
-                }
+                return self.copy(
+                    transfers: transfers,
+                    taskQueue: taskQueue,
+                    options: options,
+                    progress: progress
+                )
             }
     }
 
@@ -457,16 +458,6 @@ public class S3FileTransferManager {
                     guard file.modificationDate > transfer.from.modificationDate else { return transfer }
                     return nil
                 }
-                let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
-                transfers.forEach { transfer in
-                    taskQueue.submitTask {
-                        self.copy(from: transfer.from.file, to: transfer.to, options: options) {
-                            try folderProgress.updateProgress(transfer.from.file.key, progress: $0)
-                        }.map { _ in
-                            folderProgress.setFileUploaded(transfer.from.file.key)
-                        }
-                    }
-                }
                 // construct list of files to delete, if we are doing deletion
                 if delete == true {
                     let deletions = files.compactMap { file -> String? in
@@ -478,9 +469,12 @@ public class S3FileTransferManager {
                     }
                     deletions.forEach { deletion in taskQueue.submitTask { self.delete(deletion) } }
                 }
-                return self.complete(taskQueue: taskQueue).map { _ in
-                    assert(folderProgress.finished == true)
-                }
+                return self.copy(
+                    transfers: transfers,
+                    taskQueue: taskQueue,
+                    options: options,
+                    progress: progress
+                )
             }
     }
 
@@ -531,6 +525,33 @@ public class S3FileTransferManager {
             }
     }
 
+    /// Resume download from S3 that previously failed
+    ///
+    /// When a copy or sync to file system operation fails it will throw a
+    /// S3TransferManager.Error.downloadFailed error. This contains a `DownloadOperation`.
+    /// struct. You can resume the download by passing the struct to the this function.
+    ///
+    /// - Parameters:
+    ///   - download: Details of remaining downloads to perform
+    ///   - options: Download options
+    ///   - progress: Progress function
+    /// - Returns: EventLoopFuture fulfilled when operation is complete
+    public func resume(
+        download: DownloadOperation,
+        options: GetOptions = .init(),
+        progress: @escaping (Double) throws -> Void = { _ in }
+    ) -> EventLoopFuture<Void> {
+        let eventLoop = self.s3.eventLoopGroup.next()
+
+        let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
+        return self.copy(
+            transfers: download.transfers,
+            taskQueue: taskQueue,
+            options: options,
+            progress: progress
+        )
+    }
+
     /// delete a file on S3
     public func delete(_ s3File: S3File) -> EventLoopFuture<Void> {
         self.logger.info("Deleting \(s3File)")
@@ -550,13 +571,13 @@ public class S3FileTransferManager {
 }
 
 extension S3FileTransferManager {
-    struct FileDescriptor {
+    struct FileDescriptor: Equatable {
         let name: String
         let modificationDate: Date
         let size: Int
     }
 
-    struct S3FileDescriptor {
+    struct S3FileDescriptor: Equatable {
         let file: S3File
         let modificationDate: Date
         let size: Int
@@ -642,6 +663,39 @@ extension S3FileTransferManager {
                 }
                 return $0
             } + [file]
+        }
+    }
+
+    /// Internal version of sync, with folder progress and task queue setup
+    func copy(
+        transfers: [(from: S3FileDescriptor, to: String)],
+        taskQueue: TaskQueue<Void>,
+        options: GetOptions,
+        progress: @escaping (Double) throws -> Void
+    ) -> EventLoopFuture<Void> {
+        var failedTransfers: [(from: S3FileDescriptor, to: String)] = []
+        let lock = NIOLock()
+        let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
+        let transfersComplete = transfers.map { transfer in
+            taskQueue.submitTask {
+                self.copy(from: transfer.from.file, to: transfer.to, options: options) {
+                    try folderProgress.updateProgress(transfer.from.file.key, progress: $0)
+                }.map { _ in
+                    folderProgress.setFileUploaded(transfer.from.file.key)
+                }
+            }.flatMapErrorThrowing { error in
+                lock.withLock {
+                    failedTransfers.append(transfer)
+                }
+                throw error
+            }
+        }
+        return self.complete(taskQueue: taskQueue).map { _ in
+            assert(folderProgress.finished == true)
+        }.flatMapError { error in
+            return EventLoopFuture.andAllComplete(transfersComplete, on: taskQueue.eventLoop).flatMapThrowing {
+                throw Error.downloadFailed(error, .init(transfers: failedTransfers))
+            }
         }
     }
 

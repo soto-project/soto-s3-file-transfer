@@ -12,15 +12,28 @@
 //
 //===----------------------------------------------------------------------===//
 
+import Atomics
 import SotoS3
 @testable import SotoS3FileTransfer
 import XCTest
 
-final class S3FileTransferManagerTests: XCTestCase {
-    static let bucketName = generateResourceName("soto-transfermanagertests")
+class S3TransferManagerXCTestCase: XCTestCase {
+    static var bucketName: String = generateResourceName("soto-transfermanagertests")
     static var client: AWSClient!
     static var s3: S3!
     static var s3FileTransfer: S3FileTransferManager!
+
+    static var rootPath: String {
+        return #file
+            .split(separator: "/", omittingEmptySubsequences: false)
+            .dropLast(3)
+            .map { String(describing: $0) }
+            .joined(separator: "/")
+    }
+
+    static var tempFolder: String {
+        return rootPath.appending("/temp-folder")
+    }
 
     override class func setUp() {
         if TestEnvironment.isUsingLocalstack {
@@ -68,6 +81,23 @@ final class S3FileTransferManagerTests: XCTestCase {
         XCTAssertNoThrow(try FileManager.default.removeItem(atPath: self.tempFolder))
     }
 
+    static func generateResourceName(_ prefix: String) -> String {
+        let suffix = String(Int.random(in: Int.min..<Int.max), radix: 16)
+
+        return (prefix + suffix).lowercased()
+    }
+
+    func createRandomBuffer(size: Int) -> Data {
+        // create buffer
+        var data = Data(count: size)
+        for i in 0..<size {
+            data[i] = UInt8.random(in: 0...255)
+        }
+        return data
+    }
+}
+
+final class S3FileTransferManagerTests: S3TransferManagerXCTestCase {
     func testSyncShutdown() {
         let s3FileTransfer = S3FileTransferManager(s3: Self.s3, threadPoolProvider: .createNew, logger: Logger(label: "S3TransferTests"))
         XCTAssertNoThrow(try s3FileTransfer.syncShutdown())
@@ -82,23 +112,6 @@ final class S3FileTransferManagerTests: XCTestCase {
 
         XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: filename, to: S3File(bucket: Self.bucketName, key: "testFile"), options: .init(metadata: ["test": "1,2,3"])) { print($0) }.wait())
         XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: S3File(bucket: Self.bucketName, key: "testFile"), to: filename2) { print($0) }.wait())
-
-        defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename2)) }
-
-        var buffer2: Data?
-        XCTAssertNoThrow(try buffer2 = Data(contentsOf: URL(fileURLWithPath: filename2)))
-        XCTAssertEqual(buffer, buffer2)
-    }
-
-    func testMultipartUploadDownload() {
-        let filename = "\(Self.tempFolder)/\(#function)"
-        let filename2 = "\(Self.tempFolder)/\(#function)2"
-        let buffer = self.createRandomBuffer(size: 10_202_400)
-        XCTAssertNoThrow(try buffer.write(to: URL(fileURLWithPath: filename)))
-        defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename)) }
-
-        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: filename, to: S3File(bucket: Self.bucketName, key: "testMultipartUploadDownload")) { print($0) }.wait())
-        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: S3File(bucket: Self.bucketName, key: "testMultipartUploadDownload"), to: filename2) { print($0) }.wait())
 
         defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename2)) }
 
@@ -163,24 +176,6 @@ final class S3FileTransferManagerTests: XCTestCase {
                 XCTFail("\(error)")
             }
         }
-    }
-
-    func testS3MultipartCopy() {
-        let filename = "\(Self.tempFolder)/\(#function)"
-        let filename2 = "\(Self.tempFolder)/\(#function)2"
-        let buffer = self.createRandomBuffer(size: 10_202_400)
-        XCTAssertNoThrow(try buffer.write(to: URL(fileURLWithPath: filename)))
-        defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename)) }
-
-        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: filename, to: S3File(bucket: Self.bucketName, key: "testS3MultipartCopy")) { print($0) }.wait())
-        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: S3File(bucket: Self.bucketName, key: "testS3MultipartCopy"), to: S3File(bucket: Self.bucketName, key: "testS3MultipartCopy_Copy")).wait())
-        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: S3File(bucket: Self.bucketName, key: "testS3MultipartCopy_Copy"), to: filename2) { print($0) }.wait())
-
-        defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename2)) }
-
-        var buffer2: Data?
-        XCTAssertNoThrow(try buffer2 = Data(contentsOf: URL(fileURLWithPath: filename2)))
-        XCTAssertEqual(buffer, buffer2)
     }
 
     func testListFiles() {
@@ -266,6 +261,116 @@ final class S3FileTransferManagerTests: XCTestCase {
         XCTAssertNoThrow(try FileManager.default.removeItem(atPath: Self.tempFolder + "/Tests2"))
     }
 
+    /// Used by testCancelledSyncWithCancel and testCancelledSyncWithFlush
+    func testCancelledSync(_ s3FileTransfer: S3FileTransferManager, folderName: String) {
+        let folder = S3Folder(url: "s3://\(Self.bucketName)/\(folderName)")!
+        let localFolder = "\(Self.tempFolder)/\(#function)"
+        var originalFiles: [S3FileTransferManager.FileDescriptor]?
+        XCTAssertNoThrow(originalFiles = try s3FileTransfer.listFiles(in: Self.rootPath + "/Sources").wait())
+        XCTAssertNotEqual(originalFiles?.count, 0)
+
+        XCTAssertNoThrow(try s3FileTransfer.sync(from: Self.rootPath + "/Sources", to: folder, delete: true).wait())
+        do {
+            let cancelled = ManagedAtomic(false)
+            try s3FileTransfer.sync(from: folder, to: localFolder, delete: true) { progress in
+                // make sure we only cancel one task
+                if progress > 0.3, cancelled.exchange(true, ordering: .relaxed) == false {
+                    throw TaskQueue<Void>.Cancelled()
+                }
+            }.wait()
+        } catch {
+            // can't guarantee this check will work if only file with error is in download list
+            if s3FileTransfer.configuration.cancelOnError == true {
+                var localFiles: [S3FileTransferManager.FileDescriptor]?
+                XCTAssertNoThrow(localFiles = try s3FileTransfer.listFiles(in: localFolder).wait())
+                // check total file size for folder is different
+                XCTAssertNotEqual(localFiles?.map { $0.size }.reduce(0, +), originalFiles?.map { $0.size }.reduce(0, +))
+            }
+            if let error = error as? S3FileTransferManager.Error, case .downloadFailed(_, let download) = error {
+                try? s3FileTransfer.resume(download: download).wait()
+            }
+        }
+        var localFiles: [S3FileTransferManager.FileDescriptor]?
+        XCTAssertNoThrow(localFiles = try s3FileTransfer.listFiles(in: localFolder).wait())
+        // check total file size for folder is different
+        XCTAssertEqual(localFiles?.map { $0.size }.reduce(0, +), originalFiles?.map { $0.size }.reduce(0, +))
+    }
+
+    /// Test cancelling download with cancelOnError set to true
+    func testCancelledSyncWithCancel() {
+        let s3FileTransfer = S3FileTransferManager(
+            s3: Self.s3,
+            threadPoolProvider: .createNew,
+            configuration: .init(cancelOnError: true, maxConcurrentTasks: 2),
+            logger: Logger(label: "S3TransferTests")
+        )
+        defer {
+            try? s3FileTransfer.syncShutdown()
+        }
+        self.testCancelledSync(s3FileTransfer, folderName: "testCancelledSyncWithCancel")
+    }
+
+    /// Test cancelling download with cancelOnError set to false
+    func testCancelledSyncWithFlush() {
+        let s3FileTransfer = S3FileTransferManager(
+            s3: Self.s3,
+            threadPoolProvider: .createNew,
+            configuration: .init(cancelOnError: false, maxConcurrentTasks: 2),
+            logger: Logger(label: "S3TransferTests")
+        )
+        defer {
+            try? s3FileTransfer.syncShutdown()
+        }
+        self.testCancelledSync(s3FileTransfer, folderName: "testCancelledSyncWithFlush")
+    }
+
+    /// Used by testCancelledSyncWithCancel and testCancelledSyncWithFlush
+    func testCancelledDownload(_ s3FileTransfer: S3FileTransferManager) {
+        let folder = S3Folder(url: "s3://\(Self.bucketName)/testCancelledDownload")!
+        let localFolder = "\(Self.tempFolder)/\(#function)"
+        var originalFiles: [S3FileTransferManager.FileDescriptor]?
+        XCTAssertNoThrow(originalFiles = try s3FileTransfer.listFiles(in: Self.rootPath + "/Sources").wait())
+        XCTAssertNotEqual(originalFiles?.count, 0)
+
+        XCTAssertNoThrow(try s3FileTransfer.copy(from: Self.rootPath + "/Sources", to: folder).wait())
+        do {
+            let cancelled = ManagedAtomic(false)
+            try s3FileTransfer.copy(from: folder, to: localFolder) { progress in
+                // make sure we only cancel one task
+                if progress > 0.3, cancelled.exchange(true, ordering: .relaxed) == false {
+                    throw TaskQueue<Void>.Cancelled()
+                }
+            }.wait()
+        } catch {
+            var localFiles: [S3FileTransferManager.FileDescriptor]?
+            XCTAssertNoThrow(localFiles = try s3FileTransfer.listFiles(in: localFolder).wait())
+            // check total file size for folder is different
+            XCTAssertNotEqual(localFiles?.map { $0.size }.reduce(0, +), originalFiles?.map { $0.size }.reduce(0, +))
+            if let error = error as? S3FileTransferManager.Error, case .downloadFailed(_, let download) = error {
+                try? s3FileTransfer.resume(download: download).wait()
+            }
+        }
+        var localFiles: [S3FileTransferManager.FileDescriptor]?
+        XCTAssertNoThrow(localFiles = try s3FileTransfer.listFiles(in: localFolder).wait())
+        // check total file size for folder is different
+        XCTAssertEqual(localFiles?.map { $0.size }.reduce(0, +), originalFiles?.map { $0.size }.reduce(0, +))
+    }
+
+    /// Test cancelling download with cancelOnError set to true
+    func testCancelledDownloadWithCancel() {
+        let s3FileTransfer = S3FileTransferManager(
+            s3: Self.s3,
+            threadPoolProvider: .createNew,
+            configuration: .init(cancelOnError: true, maxConcurrentTasks: 2),
+            logger: Logger(label: "S3TransferTests")
+        )
+        defer {
+            try? s3FileTransfer.syncShutdown()
+        }
+        self.testCancelledDownload(s3FileTransfer)
+    }
+
+    /// Test deleting a folder works
     func testDeleteFolder() throws {
         let folder = S3Folder(url: "s3://\(Self.bucketName)/testDeleteFolder")!
         XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: Self.rootPath + "/Tests", to: folder, delete: true).wait())
@@ -278,25 +383,25 @@ final class S3FileTransferManagerTests: XCTestCase {
         XCTAssertEqual(files?.count, 0)
     }
 
-    func testBigFolderUpload() {
-        let folder = S3Folder(bucket: Self.bucketName, key: "testBigFolderUpload")
-        let folder2 = S3Folder(bucket: Self.bucketName, key: "testBigFolderUpload_Copy")
-        let tempFolder = Self.tempFolder + "/testBigFolderUpload"
-        var fileCount: Int?
-        XCTAssertNoThrow(fileCount = try Self.s3FileTransfer.listFiles(in: "\(Self.rootPath)/.build/checkouts/soto/Sources/Soto/Services/S3/").wait().count)
-        XCTAssertNotNil(fileCount)
-        XCTAssertNoThrow(try Self.s3FileTransfer.sync(
-            from: "\(Self.rootPath)/.build/checkouts/soto/Sources/Soto/Services",
-            to: folder,
-            delete: true,
-            progress: { print($0) }
-        ).wait())
-        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder, to: folder2, delete: true).wait())
-        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder2.subFolder("DynamoDB"), to: tempFolder, delete: true).wait())
-        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder2.subFolder("S3"), to: tempFolder, delete: true) { print($0) }.wait())
-        var files: [S3FileTransferManager.FileDescriptor]?
-        XCTAssertNoThrow(files = try Self.s3FileTransfer.listFiles(in: tempFolder).wait())
-        XCTAssertEqual(files?.count, fileCount)
+    /// Test sync'ing folder, deleting subfolder and then sync'ing back to client. This uses source code
+    /// as the data, so if source code changes structure it may start failing
+    func testDeleteFolderAndSync() throws {
+        let folder = S3Folder(url: "s3://\(Self.bucketName)/testDeleteFolderAndSync")!
+        let localFolder = "\(Self.tempFolder)/\(#function)"
+        var originalFiles: [S3FileTransferManager.FileDescriptor]?
+        XCTAssertNoThrow(originalFiles = try Self.s3FileTransfer.listFiles(in: Self.rootPath + "/Sources").wait())
+        XCTAssertNotEqual(originalFiles?.count, 0)
+
+        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: Self.rootPath + "/Sources", to: folder, delete: true).wait())
+        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder, to: localFolder, delete: true).wait())
+        var localFiles: [S3FileTransferManager.FileDescriptor]?
+        XCTAssertNoThrow(localFiles = try Self.s3FileTransfer.listFiles(in: localFolder).wait())
+        XCTAssertEqual(localFiles?.count, originalFiles?.count)
+
+        XCTAssertNoThrow(try Self.s3FileTransfer.delete(folder.subFolder("SotoS3FileTransfer/AsyncAwaitSupport")).wait())
+        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder, to: localFolder, delete: true).wait())
+        XCTAssertNoThrow(localFiles = try Self.s3FileTransfer.listFiles(in: localFolder).wait())
+        XCTAssertEqual(localFiles?.count, originalFiles.map { $0.count - 1 })
     }
 
     /// test we get an error when trying to download a folder on top of a file
@@ -318,10 +423,9 @@ final class S3FileTransferManagerTests: XCTestCase {
         let folder1 = S3Folder(bucket: Self.bucketName, key: "testDownloadFolderToFile")
         XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: Self.rootPath + "/Sources", to: folder1).wait())
         XCTAssertThrowsError(try Self.s3FileTransfer.copy(from: folder1, to: "\(Self.rootPath)/Package.swift").wait()) { error in
-            switch error {
-            case let error as NSError:
-                XCTAssertEqual(error.code, 512)
-            default:
+            if let error = error as? S3FileTransferManager.Error, case .downloadFailed(let error, _) = error {
+                XCTAssertEqual((error as NSError).code, 512)
+            } else {
                 XCTFail("\(error)")
             }
         }
@@ -359,31 +463,64 @@ final class S3FileTransferManagerTests: XCTestCase {
         XCTAssertNoThrow(files = try Self.s3FileTransfer.listFiles(in: Self.tempFolder + "/testIgnoreFileFolderClash").wait())
         XCTAssertEqual(files?.count, 4)
     }
+}
 
-    static var rootPath: String {
-        return #file
-            .split(separator: "/", omittingEmptySubsequences: false)
-            .dropLast(3)
-            .map { String(describing: $0) }
-            .joined(separator: "/")
+final class S3MultipartTransferManagerTests: S3TransferManagerXCTestCase {
+    func testMultipartUploadDownload() {
+        let filename = "\(Self.tempFolder)/\(#function)"
+        let filename2 = "\(Self.tempFolder)/\(#function)2"
+        let buffer = self.createRandomBuffer(size: 10_202_400)
+        XCTAssertNoThrow(try buffer.write(to: URL(fileURLWithPath: filename)))
+        defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename)) }
+
+        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: filename, to: S3File(bucket: Self.bucketName, key: "testMultipartUploadDownload")) { print($0) }.wait())
+        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: S3File(bucket: Self.bucketName, key: "testMultipartUploadDownload"), to: filename2) { print($0) }.wait())
+
+        defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename2)) }
+
+        var buffer2: Data?
+        XCTAssertNoThrow(try buffer2 = Data(contentsOf: URL(fileURLWithPath: filename2)))
+        XCTAssertEqual(buffer, buffer2)
     }
 
-    static var tempFolder: String {
-        return rootPath.appending("/temp-folder")
+    func testS3MultipartCopy() {
+        let filename = "\(Self.tempFolder)/\(#function)"
+        let filename2 = "\(Self.tempFolder)/\(#function)2"
+        let buffer = self.createRandomBuffer(size: 10_202_400)
+        XCTAssertNoThrow(try buffer.write(to: URL(fileURLWithPath: filename)))
+        defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename)) }
+
+        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: filename, to: S3File(bucket: Self.bucketName, key: "testS3MultipartCopy")) { print($0) }.wait())
+        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: S3File(bucket: Self.bucketName, key: "testS3MultipartCopy"), to: S3File(bucket: Self.bucketName, key: "testS3MultipartCopy_Copy")).wait())
+        XCTAssertNoThrow(try Self.s3FileTransfer.copy(from: S3File(bucket: Self.bucketName, key: "testS3MultipartCopy_Copy"), to: filename2) { print($0) }.wait())
+
+        defer { XCTAssertNoThrow(try FileManager.default.removeItem(atPath: filename2)) }
+
+        var buffer2: Data?
+        XCTAssertNoThrow(try buffer2 = Data(contentsOf: URL(fileURLWithPath: filename2)))
+        XCTAssertEqual(buffer, buffer2)
     }
+}
 
-    func createRandomBuffer(size: Int) -> Data {
-        // create buffer
-        var data = Data(count: size)
-        for i in 0..<size {
-            data[i] = UInt8.random(in: 0...255)
-        }
-        return data
-    }
-
-    static func generateResourceName(_ prefix: String) -> String {
-        let suffix = String(Int.random(in: Int.min..<Int.max), radix: 16)
-
-        return (prefix + suffix).lowercased()
+final class S3BigFileTransferManagerTests: S3TransferManagerXCTestCase {
+    func testBigFolderUpload() {
+        let folder = S3Folder(bucket: Self.bucketName, key: "testBigFolderUpload")
+        let folder2 = S3Folder(bucket: Self.bucketName, key: "testBigFolderUpload_Copy")
+        let tempFolder = Self.tempFolder + "/testBigFolderUpload"
+        var fileCount: Int?
+        XCTAssertNoThrow(fileCount = try Self.s3FileTransfer.listFiles(in: "\(Self.rootPath)/.build/checkouts/soto/Sources/Soto/Services/S3/").wait().count)
+        XCTAssertNotNil(fileCount)
+        XCTAssertNoThrow(try Self.s3FileTransfer.sync(
+            from: "\(Self.rootPath)/.build/checkouts/soto/Sources/Soto/Services",
+            to: folder,
+            delete: true,
+            progress: { print($0) }
+        ).wait())
+        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder, to: folder2, delete: true).wait())
+        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder2.subFolder("DynamoDB"), to: tempFolder, delete: true).wait())
+        XCTAssertNoThrow(try Self.s3FileTransfer.sync(from: folder2.subFolder("S3"), to: tempFolder, delete: true) { print($0) }.wait())
+        var files: [S3FileTransferManager.FileDescriptor]?
+        XCTAssertNoThrow(files = try Self.s3FileTransfer.listFiles(in: tempFolder).wait())
+        XCTAssertEqual(files?.count, fileCount)
     }
 }

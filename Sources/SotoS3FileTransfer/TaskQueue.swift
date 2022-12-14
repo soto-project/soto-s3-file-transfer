@@ -80,10 +80,10 @@ class TaskQueue<Value> {
     /// Cancel all tasks in the queue and return EventLoopFuture that succeeds when all in flight tasks have completed.
     func cancel() -> EventLoopFuture<Void> {
         self.eventLoop.flatSubmit { () -> EventLoopFuture<Void> in
-            self.clearQueue()
-            return EventLoopFuture.whenAllComplete(self.inflightTasks.map { $0.promise.futureResult }, on: self.eventLoop)
-                .map { _ in }
-                .always { _ in }
+            return self.clearQueue().flatMap { _ in
+                return EventLoopFuture.andAllComplete(self.inflightTasks.map { $0.promise.futureResult }, on: self.eventLoop)
+                    .always { _ in }
+            }
         }
     }
 
@@ -113,10 +113,13 @@ class TaskQueue<Value> {
         }
     }
 
-    private func clearQueue() {
+    private func clearQueue() -> EventLoopFuture<Void> {
         self.eventLoop.preconditionInEventLoop()
+        let eventLoopFutures = self.queue.map { $0.promise.futureResult }
         while let task = self.queue.popFirst() {
             task.promise.fail(Cancelled())
         }
+        // return once all tasks are failed
+        return EventLoopFuture.andAllComplete(eventLoopFutures, on: self.eventLoop)
     }
 }
