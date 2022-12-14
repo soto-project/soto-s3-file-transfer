@@ -36,4 +36,4 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v2
     - name: Test
-      run: swift build
+      run: swift test
