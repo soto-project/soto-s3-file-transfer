@@ -17,7 +17,7 @@ import NIOConcurrencyHelpers
 
 extension S3FileTransferManager {
     class FolderUploadProgress {
-        let lock: Lock
+        let lock: NIOLock
         let totalSize: UInt64
         let sizes: [String: UInt64]
         var uploadedSize: UInt64
@@ -25,7 +25,7 @@ extension S3FileTransferManager {
         var progressFunc: (Double) throws -> Void = { _ in }
 
         init(_ s3Files: [S3FileDescriptor], progress: @escaping (Double) throws -> Void = { _ in }) {
-            self.lock = Lock()
+            self.lock = .init()
             self.sizes = .init(s3Files.map { (key: $0.file.key, value: UInt64($0.size)) }) { first, _ in first }
             self.totalSize = self.sizes.values.reduce(UInt64(0), +)
             self.uploadedSize = 0
@@ -34,7 +34,7 @@ extension S3FileTransferManager {
         }
 
         init(_ files: [FileDescriptor], progress: @escaping (Double) throws -> Void = { _ in }) {
-            self.lock = Lock()
+            self.lock = .init()
             self.sizes = .init(files.map { (key: $0.name, value: UInt64($0.size)) }) { first, _ in first }
             self.totalSize = self.sizes.values.reduce(UInt64(0), +)
             self.uploadedSize = 0

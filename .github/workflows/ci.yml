@@ -22,13 +22,18 @@ jobs:
     strategy:
       matrix:
         image:
-          - swift:5.4
           - swift:5.5
           - swift:5.6
+          - swift:5.7
+    services:
+      localstack:
+        image: localstack/localstack
     container:
       image: ${{ matrix.image }}
+      env:
+        LOCALSTACK_ENDPOINT : "http://localstack:4566"
     steps:
     - name: Checkout
       uses: actions/checkout@v2
     - name: Test
-      run: swift build
+      run: swift test
