@@ -23,8 +23,21 @@ final class S3FileTransferManagerTests: XCTestCase {
     static var s3FileTransfer: S3FileTransferManager!
 
     override class func setUp() {
-        self.client = AWSClient(httpClientProvider: .createNew)
-        self.s3 = S3(client: self.client, region: .euwest1).with(middlewares: [AWSLoggingMiddleware()], timeout: .seconds(30))
+        if TestEnvironment.isUsingLocalstack {
+            print("Connecting to Localstack")
+        } else {
+            print("Connecting to AWS")
+        }
+        self.client = AWSClient(
+            credentialProvider: TestEnvironment.credentialProvider,
+            middlewares: TestEnvironment.middlewares,
+            httpClientProvider: .createNew
+        )
+        self.s3 = S3(
+            client: self.client,
+            region: .euwest1,
+            endpoint: TestEnvironment.getEndPoint(environment: "LOCALSTACK_ENDPOINT")
+        ).with(timeout: .seconds(30))
         self.s3FileTransfer = .init(s3: self.s3, threadPoolProvider: .createNew, logger: Logger(label: "S3TransferTests"))
 
         XCTAssertNoThrow(try FileManager.default.createDirectory(atPath: self.tempFolder, withIntermediateDirectories: false))
@@ -53,6 +66,11 @@ final class S3FileTransferManagerTests: XCTestCase {
         XCTAssertNoThrow(try self.s3FileTransfer.syncShutdown())
         XCTAssertNoThrow(try self.client.syncShutdown())
         XCTAssertNoThrow(try FileManager.default.removeItem(atPath: self.tempFolder))
+    }
+
+    func testSyncShutdown() {
+        let s3FileTransfer = S3FileTransferManager(s3: Self.s3, threadPoolProvider: .createNew, logger: Logger(label: "S3TransferTests"))
+        XCTAssertNoThrow(try s3FileTransfer.syncShutdown())
     }
 
     func testUploadDownload() {
