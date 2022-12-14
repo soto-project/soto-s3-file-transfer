@@ -674,7 +674,7 @@ extension S3FileTransferManager {
         progress: @escaping (Double) throws -> Void
     ) -> EventLoopFuture<Void> {
         var failedTransfers: [(from: S3FileDescriptor, to: String)] = []
-        let lock = NSLock()
+        let lock = NIOLock()
         let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
         let transfersComplete = transfers.map { transfer in
             taskQueue.submitTask {
