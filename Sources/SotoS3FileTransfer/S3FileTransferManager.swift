@@ -393,9 +393,11 @@ public class S3FileTransferManager {
                 let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
                 let folderResolved = URL(fileURLWithPath: folder).standardizedFileURL.resolvingSymlinksInPath()
                 let targetFiles = Self.targetFiles(files: files, from: folderResolved.path, to: s3Folder)
+                let s3KeyMap = Dictionary(uniqueKeysWithValues: s3Files.map { ($0.file.key, $0) })
+                let targetKeyMap = Dictionary(uniqueKeysWithValues: targetFiles.map { ($0.to.key, $0) })
                 let transfers = targetFiles.compactMap { transfer -> (from: FileDescriptor, to: S3File)? in
                     // does file exist on S3
-                    guard let s3File = s3Files.first(where: { $0.file.key == transfer.to.key }) else { return transfer }
+                    guard let s3File = s3KeyMap[transfer.to.key] else { return transfer }
                     // does file on S3 have a later date
                     guard s3File.modificationDate > transfer.from.modificationDate else { return transfer }
                     return nil
@@ -413,7 +415,7 @@ public class S3FileTransferManager {
                 // construct list of files to delete, if we are doing deletion
                 if delete == true {
                     let deletions = s3Files.compactMap { s3File -> S3File? in
-                        if targetFiles.first(where: { $0.to.key == s3File.file.key }) == nil {
+                        if targetKeyMap[s3File.file.key] == nil {
                             return s3File.file
                         } else {
                             return nil
