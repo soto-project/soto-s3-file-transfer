@@ -394,7 +394,6 @@ public class S3FileTransferManager {
                 let folderResolved = URL(fileURLWithPath: folder).standardizedFileURL.resolvingSymlinksInPath()
                 let targetFiles = Self.targetFiles(files: files, from: folderResolved.path, to: s3Folder)
                 let s3KeyMap = Dictionary(uniqueKeysWithValues: s3Files.map { ($0.file.key, $0) })
-                let targetKeyMap = Dictionary(uniqueKeysWithValues: targetFiles.map { ($0.to.key, $0) })
                 let transfers = targetFiles.compactMap { transfer -> (from: FileDescriptor, to: S3File)? in
                     // does file exist on S3
                     guard let s3File = s3KeyMap[transfer.to.key] else { return transfer }
@@ -414,6 +413,7 @@ public class S3FileTransferManager {
                 }
                 // construct list of files to delete, if we are doing deletion
                 if delete == true {
+                    let targetKeyMap = Dictionary(uniqueKeysWithValues: targetFiles.map { ($0.to.key, $0) })
                     let deletions = s3Files.compactMap { s3File -> S3File? in
                         if targetKeyMap[s3File.file.key] == nil {
                             return s3File.file
@@ -454,7 +454,6 @@ public class S3FileTransferManager {
                 let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
                 let targetFiles = Self.targetFiles(files: s3Files, from: s3Folder, to: folder)
                 let fileNameMap = Dictionary(uniqueKeysWithValues: files.map { ($0.name, $0) })
-                let targetToMap = Dictionary(uniqueKeysWithValues: targetFiles.map { ($0.to, $0) })
                 let transfers = targetFiles.compactMap { transfer -> (from: S3FileDescriptor, to: String)? in
                     // does file exist locally
                     guard let file = fileNameMap[transfer.to] else { return transfer }
@@ -464,6 +463,7 @@ public class S3FileTransferManager {
                 }
                 // construct list of files to delete, if we are doing deletion
                 if delete == true {
+                    let targetToMap = Dictionary(uniqueKeysWithValues: targetFiles.map { ($0.to, $0) })
                     let deletions = files.compactMap { file -> String? in
                         if targetToMap[file.name] == nil {
                             return file.name
@@ -505,7 +505,6 @@ public class S3FileTransferManager {
                 let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
                 let targetFiles = Self.targetFiles(files: srcFiles, from: srcFolder, to: destFolder)
                 let destKeyMap = Dictionary(uniqueKeysWithValues: destFiles.map { ($0.file.key, $0) })
-                let targetKeyMap = Dictionary(uniqueKeysWithValues: targetFiles.map { ($0.to.key, $0) })
                 let transfers = targetFiles.compactMap { transfer -> (from: S3FileDescriptor, to: S3File)? in
                     // does file exist in destination folder
                     guard let file = destKeyMap[transfer.to.key] else { return transfer }
@@ -518,6 +517,7 @@ public class S3FileTransferManager {
                 }
                 // construct list of files to delete, if we are doing deletion
                 if delete == true {
+                    let targetKeyMap = Dictionary(uniqueKeysWithValues: targetFiles.map { ($0.to.key, $0) })
                     let deletions = destFiles.compactMap { file -> S3File? in
                         if targetKeyMap[file.file.key] == nil {
                             return file.file
