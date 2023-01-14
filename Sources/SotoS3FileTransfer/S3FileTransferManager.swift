@@ -413,12 +413,12 @@ public class S3FileTransferManager {
                 }
                 // construct list of files to delete, if we are doing deletion
                 if delete == true {
-                    let targetKeyMap = Dictionary(uniqueKeysWithValues: targetFiles.map { ($0.to.key, $0) })
+                    let targetKeys = Set(targetFiles.map { $0.to.key })
                     let deletions = s3Files.compactMap { s3File -> S3File? in
-                        if targetKeyMap[s3File.file.key] == nil {
-                            return s3File.file
-                        } else {
+                        if targetKeys.contains(s3File.file.key) {
                             return nil
+                        } else {
+                            return s3File.file
                         }
                     }
                     deletions.forEach { deletion in taskQueue.submitTask { self.delete(deletion) } }
@@ -463,12 +463,12 @@ public class S3FileTransferManager {
                 }
                 // construct list of files to delete, if we are doing deletion
                 if delete == true {
-                    let targetToMap = Dictionary(uniqueKeysWithValues: targetFiles.map { ($0.to, $0) })
+                    let targetTos = Set(targetFiles.map { $0.to })
                     let deletions = files.compactMap { file -> String? in
-                        if targetToMap[file.name] == nil {
-                            return file.name
-                        } else {
+                        if targetTos.contains(file.name) {
                             return nil
+                        } else {
+                            return file.name
                         }
                     }
                     deletions.forEach { deletion in taskQueue.submitTask { self.delete(deletion) } }
@@ -517,12 +517,12 @@ public class S3FileTransferManager {
                 }
                 // construct list of files to delete, if we are doing deletion
                 if delete == true {
-                    let targetKeyMap = Dictionary(uniqueKeysWithValues: targetFiles.map { ($0.to.key, $0) })
+                    let targetKeys = Set(targetFiles.map { $0.to.key })
                     let deletions = destFiles.compactMap { file -> S3File? in
-                        if targetKeyMap[file.file.key] == nil {
-                            return file.file
-                        } else {
+                        if targetKeys.contains(file.file.key) {
                             return nil
+                        } else {
+                            return file.file
                         }
                     }
                     deletions.forEach { deletion in taskQueue.submitTask { self.delete(deletion) } }
