@@ -142,7 +142,7 @@ public class S3FileTransferManager {
         options: PutOptions = .init(),
         progress: @escaping (Double) throws -> Void = { _ in }
     ) -> EventLoopFuture<Void> {
-        self.logger.info("Copy from: \(from) to \(to)")
+        self.logger.debug("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
         return self.fileIO.openFile(path: from, eventLoop: eventLoop)
             .flatMapErrorThrowing { _ in
@@ -190,7 +190,7 @@ public class S3FileTransferManager {
         options: GetOptions = .init(),
         progress: @escaping (Double) throws -> Void = { _ in }
     ) -> EventLoopFuture<Void> {
-        self.logger.info("Copy from: \(from) to \(to)")
+        self.logger.debug("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
         var bytesDownloaded = 0
         var fileSize: Int64 = 0
@@ -259,7 +259,7 @@ public class S3FileTransferManager {
         fileSize: Int? = nil,
         options: CopyOptions = .init()
     ) -> EventLoopFuture<Void> {
-        self.logger.info("Copy from: \(from) to \(to)")
+        self.logger.debug("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
         let copySource = "/\(from.bucket)/\(from.key)".addingPercentEncoding(withAllowedCharacters: Self.pathAllowedCharacters)!
         let request = S3.CopyObjectRequest(bucket: to.bucket, copySource: copySource, key: to.key, options: options)
@@ -554,7 +554,7 @@ public class S3FileTransferManager {
 
     /// delete a file on S3
     public func delete(_ s3File: S3File) -> EventLoopFuture<Void> {
-        self.logger.info("Deleting \(s3File)")
+        self.logger.debug("Deleting \(s3File)")
         return self.s3.deleteObject(.init(bucket: s3File.bucket, key: s3File.key), logger: self.logger).map { _ in }
     }
 
@@ -701,7 +701,7 @@ extension S3FileTransferManager {
 
     /// delete a local file
     func delete(_ file: String) -> EventLoopFuture<Void> {
-        self.logger.info("Deleting \(file)")
+        self.logger.debug("Deleting \(file)")
         let eventLoop = self.s3.eventLoopGroup.next()
         return self.threadPool.runIfActive(eventLoop: eventLoop) {
             try FileManager.default.removeItem(atPath: file)
