@@ -9,7 +9,7 @@ Soto S3 Transfer uses the Soto Swift SDK for AWS. You need to create a Soto S3 s
 ```swift
 let client = AWSClient(httpClientProvider: .createNew)
 let s3 = S3(client: client, region: .euwest1)
-let s3FileTransfer = S3FileTransferManager(s3: s3, threadPoolProvider: .createNew)
+let s3FileTransfer = S3FileTransferManager(s3: s3, threadPoolProvider: .singleton)
 ```
 
 ## Shutdown
@@ -36,7 +36,7 @@ If you are uploading a folder multiple files will be uploaded in parallel. The n
 ```swift
 let s3Transfer = S3FileTransferManager(
     s3: s3, 
-    threadPoolProvider: .createNew,
+    threadPoolProvider: .singleton,
     configuration: .init(maxConcurrentTasks: 8)
 )
 ```
@@ -91,7 +91,7 @@ If uploads are above a certain size then the transfer manager will use multipart
 ```swift
 let s3Transfer = S3FileTransferManager(
     s3: s3, 
-    threadPoolProvider: .createNew,
+    threadPoolProvider: .singleton,
     configuration: .init(multipartThreshold: 16*1024*1024, multipartPartSize: 16*1024*1024)
 )
 ```
