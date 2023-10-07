@@ -51,7 +51,7 @@ class S3TransferManagerXCTestCase: XCTestCase {
             region: .euwest1,
             endpoint: TestEnvironment.getEndPoint(environment: "LOCALSTACK_ENDPOINT")
         ).with(timeout: .seconds(30))
-        self.s3FileTransfer = .init(s3: self.s3, threadPoolProvider: .createNew, logger: Logger(label: "S3TransferTests"))
+        self.s3FileTransfer = .init(s3: self.s3, threadPoolProvider: .singleton, logger: Logger(label: "S3TransferTests"))
 
         XCTAssertNoThrow(try FileManager.default.createDirectory(atPath: self.tempFolder, withIntermediateDirectories: false))
         XCTAssertNoThrow(try self.s3.createBucket(.init(bucket: self.bucketName)).wait())
@@ -99,7 +99,7 @@ class S3TransferManagerXCTestCase: XCTestCase {
 
 final class S3FileTransferManagerTests: S3TransferManagerXCTestCase {
     func testSyncShutdown() {
-        let s3FileTransfer = S3FileTransferManager(s3: Self.s3, threadPoolProvider: .createNew, logger: Logger(label: "S3TransferTests"))
+        let s3FileTransfer = S3FileTransferManager(s3: Self.s3, threadPoolProvider: .singleton, logger: Logger(label: "S3TransferTests"))
         XCTAssertNoThrow(try s3FileTransfer.syncShutdown())
     }
 
@@ -300,7 +300,7 @@ final class S3FileTransferManagerTests: S3TransferManagerXCTestCase {
     func testCancelledSyncWithCancel() {
         let s3FileTransfer = S3FileTransferManager(
             s3: Self.s3,
-            threadPoolProvider: .createNew,
+            threadPoolProvider: .singleton,
             configuration: .init(cancelOnError: true, maxConcurrentTasks: 2),
             logger: Logger(label: "S3TransferTests")
         )
@@ -314,7 +314,7 @@ final class S3FileTransferManagerTests: S3TransferManagerXCTestCase {
     func testCancelledSyncWithFlush() {
         let s3FileTransfer = S3FileTransferManager(
             s3: Self.s3,
-            threadPoolProvider: .createNew,
+            threadPoolProvider: .singleton,
             configuration: .init(cancelOnError: false, maxConcurrentTasks: 2),
             logger: Logger(label: "S3TransferTests")
         )
@@ -360,7 +360,7 @@ final class S3FileTransferManagerTests: S3TransferManagerXCTestCase {
     func testCancelledDownloadWithCancel() {
         let s3FileTransfer = S3FileTransferManager(
             s3: Self.s3,
-            threadPoolProvider: .createNew,
+            threadPoolProvider: .singleton,
             configuration: .init(cancelOnError: true, maxConcurrentTasks: 2),
             logger: Logger(label: "S3TransferTests")
         )

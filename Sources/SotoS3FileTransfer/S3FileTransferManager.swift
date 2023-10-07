@@ -101,6 +101,8 @@ public class S3FileTransferManager {
         case .createNew:
             self.threadPool = NIOThreadPool(numberOfThreads: 2)
             self.threadPool.start()
+        case .singleton:
+            self.threadPool = NIOThreadPool.singleton
         case .shared(let sharedPool):
             self.threadPool = sharedPool
         }
