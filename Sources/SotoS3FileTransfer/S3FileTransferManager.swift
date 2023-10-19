@@ -15,8 +15,9 @@
 import Atomics
 import Foundation
 import Logging
-import NIO
+import NIOCore
 import NIOConcurrencyHelpers
+import NIOPosix
 import SotoS3
 
 /// S3 Transfer manager. Transfers files/folders back and forth between S3 and your local file system
@@ -142,42 +143,37 @@ public class S3FileTransferManager {
         from: String,
         to: S3File,
         options: PutOptions = .init(),
-        progress: @escaping (Double) throws -> Void = { _ in }
-    ) -> EventLoopFuture<Void> {
+        progress: @escaping @Sendable (Double) throws -> Void = { _ in }
+    ) async throws {
         self.logger.debug("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
-        return self.fileIO.openFile(path: from, eventLoop: eventLoop)
-            .flatMapErrorThrowing { _ in
-                throw Error.fileDoesNotExist(String(describing: from))
+        let attributes = try await self.threadPool.runIfActive(eventLoop: eventLoop) {
+            try FileManager.default.attributesOfItem(atPath: from)
+        }.get()
+        let fileSize = attributes[.size] as? Int ?? 0
+        // if file size is greater than multipart threshold then use multipart upload for uploading the file
+        if fileSize > self.configuration.multipartThreshold {
+            let request = S3.CreateMultipartUploadRequest(bucket: to.bucket, key: to.key, options: options)
+            try await self.s3.multipartUpload(
+                request,
+                partSize: self.configuration.multipartPartSize,
+                filename: from,
+                abortOnFail: true,
+                logger: self.logger,
+                threadPoolProvider: .shared(self.threadPool),
+                progress: progress
+            )
+            try? progress(1.0)
+        } else {
+            let payload: AWSPayload = .fileHandle(fileHandle, offset: 0, size: fileSize, fileIO: self.fileIO) { downloaded in
+                try progress(Double(downloaded) / Double(fileSize))
             }
-            .flatMap { fileHandle, fileRegion in
-                let fileSize = fileRegion.readableBytes
-                // if file size is greater than multipart threshold then use multipart upload for uploading the file
-                if fileSize > self.configuration.multipartThreshold {
-                    let request = S3.CreateMultipartUploadRequest(bucket: to.bucket, key: to.key, options: options)
-                    return self.s3.multipartUpload(
-                        request,
-                        partSize: self.configuration.multipartPartSize,
-                        fileHandle: fileHandle,
-                        fileIO: self.fileIO,
-                        uploadSize: fileSize,
-                        abortOnFail: true,
-                        logger: self.logger,
-                        on: eventLoop,
-                        progress: progress
-                    )
-                    .flatMapThrowing { _ in try? progress(1.0) }
-                    .closeFileHandle(fileHandle)
-                } else {
-                    let payload: AWSPayload = .fileHandle(fileHandle, offset: 0, size: fileSize, fileIO: self.fileIO) { downloaded in
-                        try progress(Double(downloaded) / Double(fileSize))
-                    }
-                    let request = S3.PutObjectRequest(body: payload, bucket: to.bucket, key: to.key, options: options)
-                    return self.s3.putObject(request, logger: self.logger, on: eventLoop)
-                        .flatMapThrowing { _ in try? progress(1.0) }
-                        .closeFileHandle(fileHandle)
-                }
-            }
+            let request = S3.PutObjectRequest(body: payload, bucket: to.bucket, key: to.key, options: options)
+            return self.s3.putObject(request, logger: self.logger, on: eventLoop)
+                .flatMapThrowing { _ in try? progress(1.0) }
+                .closeFileHandle(fileHandle)
+        }
+    }
     }
 
     /// Copy from S3 file, to local file
