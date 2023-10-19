@@ -143,7 +143,7 @@ extension S3FileTransferManager {
 }
 
 extension S3.PutObjectRequest {
-    init(body: AWSPayload, bucket: String, key: String, options: S3FileTransferManager.PutOptions) {
+    init(body: AWSHTTPBody, bucket: String, key: String, options: S3FileTransferManager.PutOptions) {
         self.init(
             acl: options.acl,
             body: body,

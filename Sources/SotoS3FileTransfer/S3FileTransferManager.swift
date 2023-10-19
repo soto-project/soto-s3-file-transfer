@@ -15,8 +15,8 @@
 import Atomics
 import Foundation
 import Logging
-import NIOCore
 import NIOConcurrencyHelpers
+import NIOCore
 import NIOPosix
 import SotoS3
 
@@ -94,43 +94,12 @@ public class S3FileTransferManager {
         threadPoolProvider: S3.ThreadPoolProvider,
         configuration: Configuration = Configuration(),
         logger: Logger = AWSClient.loggingDisabled
-    ) {
+    ) async {
         self.s3 = s3
-        self.threadPoolProvider = threadPoolProvider
-
-        switch threadPoolProvider {
-        case .createNew:
-            self.threadPool = NIOThreadPool(numberOfThreads: 2)
-            self.threadPool.start()
-        case .singleton:
-            self.threadPool = NIOThreadPool.singleton
-        case .shared(let sharedPool):
-            self.threadPool = sharedPool
-        }
+        self.threadPool = await threadPoolProvider.threadPool
         self.fileIO = NonBlockingFileIO(threadPool: self.threadPool)
         self.configuration = configuration
         self.logger = logger
-    }
-
-    deinit {
-        // if class owned its own thread pool then makes sure it has been deleted
-        if case .createNew = self.threadPoolProvider {
-            assert(
-                self.isShutdown.load(ordering: .relaxed),
-                "S3FileTransferManager not shut down before the deinit. Please call S3FileTransferManager.syncShutdown() when no longer needed."
-            )
-        }
-    }
-
-    /// Shutdown S3 Transfer manager.
-    ///
-    /// If a thread pool was not passed at initialisation then it is required that `syncShutdown` is called
-    /// prior to deleting the class so the thread pool can be shutdown.
-    public func syncShutdown() throws {
-        if case .createNew = self.threadPoolProvider {
-            try threadPool.syncShutdownGracefully()
-            self.isShutdown.store(true, ordering: .relaxed)
-        }
     }
 
     /// Copy from local file, to S3 file
@@ -143,7 +112,7 @@ public class S3FileTransferManager {
         from: String,
         to: S3File,
         options: PutOptions = .init(),
-        progress: @escaping @Sendable (Double) throws -> Void = { _ in }
+        progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws {
         self.logger.debug("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
@@ -154,26 +123,39 @@ public class S3FileTransferManager {
         // if file size is greater than multipart threshold then use multipart upload for uploading the file
         if fileSize > self.configuration.multipartThreshold {
             let request = S3.CreateMultipartUploadRequest(bucket: to.bucket, key: to.key, options: options)
-            try await self.s3.multipartUpload(
+            _ = try await self.s3.multipartUpload(
                 request,
                 partSize: self.configuration.multipartPartSize,
                 filename: from,
                 abortOnFail: true,
-                logger: self.logger,
                 threadPoolProvider: .shared(self.threadPool),
+                logger: self.logger,
                 progress: progress
             )
-            try? progress(1.0)
+            progress(1.0)
         } else {
-            let payload: AWSPayload = .fileHandle(fileHandle, offset: 0, size: fileSize, fileIO: self.fileIO) { downloaded in
-                try progress(Double(downloaded) / Double(fileSize))
+            let fileIO = NonBlockingFileIO(threadPool: self.threadPool)
+            let (fileHandle, fileRegion) = try await fileIO.openFile(path: from, eventLoop: eventLoop).get()
+            defer {
+                try? fileHandle.close()
             }
-            let request = S3.PutObjectRequest(body: payload, bucket: to.bucket, key: to.key, options: options)
-            return self.s3.putObject(request, logger: self.logger, on: eventLoop)
-                .flatMapThrowing { _ in try? progress(1.0) }
-                .closeFileHandle(fileHandle)
+
+            let body: AWSHTTPBody = .init(
+                asyncSequence: FileByteBufferAsyncSequence(
+                    fileHandle,
+                    fileIO: fileIO,
+                    chunkSize: 64 * 1024,
+                    byteBufferAllocator: self.s3.config.byteBufferAllocator,
+                    eventLoop: eventLoop
+                ),
+                length: fileRegion.readableBytes
+            ) /* .fileHandle(fileHandle, offset: 0, size: fileSize, fileIO: self.fileIO) { downloaded in
+                 try progress(Double(downloaded) / Double(fileSize))
+             }*/
+            let request = S3.PutObjectRequest(body: body, bucket: to.bucket, key: to.key, options: options)
+            _ = try await self.s3.putObject(request, logger: self.logger)
+            progress(1.0)
         }
-    }
     }
 
     /// Copy from S3 file, to local file
@@ -186,62 +168,61 @@ public class S3FileTransferManager {
         from: S3File,
         to: String,
         options: GetOptions = .init(),
-        progress: @escaping (Double) throws -> Void = { _ in }
-    ) -> EventLoopFuture<Void> {
+        progress: @escaping (Double) -> Void = { _ in }
+    ) async throws {
         self.logger.debug("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
-        var bytesDownloaded = 0
-        var fileSize: Int64 = 0
 
-        // check for existence of file and get its filesize so we can calculate progress
-        return self.s3.headObject(.init(bucket: from.bucket, key: from.key), logger: self.logger, on: eventLoop).flatMapErrorThrowing { error in
+        // check for existence of file
+        do {
+            _ = try await self.s3.headObject(.init(bucket: from.bucket, key: from.key), logger: self.logger)
+        } catch {
             if let error = error as? S3ErrorType, error == .notFound {
                 throw Error.fileDoesNotExist(String(describing: from))
             }
             throw error
-        }.flatMap { response in
-            fileSize = response.contentLength ?? 1
-            return self.threadPool.runIfActive(eventLoop: eventLoop) { () -> String in
-                var to = to
-                // if `to` is a folder append name of object to end of `to` string to place object in folder `to`.
-                var isDirectory: ObjCBool = false
-                if FileManager.default.fileExists(atPath: to, isDirectory: &isDirectory), isDirectory.boolValue == true {
-                    if var lastSlash = from.key.lastIndex(of: "/") {
-                        lastSlash = from.key.index(after: lastSlash)
-                        to = "\(to)/\(from.key[lastSlash...])"
-                    } else {
-                        to = "\(to)/\(from.key)"
-                    }
+        }
+        let filename = try await self.threadPool.runIfActive(eventLoop: eventLoop) { () -> String in
+            var to = to
+            // if `to` is a folder append name of object to end of `to` string to place object in folder `to`.
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: to, isDirectory: &isDirectory), isDirectory.boolValue == true {
+                if var lastSlash = from.key.lastIndex(of: "/") {
+                    lastSlash = from.key.index(after: lastSlash)
+                    to = "\(to)/\(from.key[lastSlash...])"
                 } else {
-                    // create folder to place file in, if it doesn't exist already
-                    let folder: String
-                    var isDirectory: ObjCBool = false
-                    if let lastSlash = to.lastIndex(of: "/") {
-                        folder = String(to[..<lastSlash])
-                    } else {
-                        folder = to
-                    }
-                    if FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory) {
-                        guard isDirectory.boolValue else { throw Error.failedToCreateFolder(folder) }
-                    } else {
-                        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
-                    }
+                    to = "\(to)/\(from.key)"
                 }
-                return to
-            }
-        }.flatMap { filename in
-            self.fileIO.openFile(path: filename, mode: .write, flags: .allowFileCreation(), eventLoop: eventLoop)
-        }.flatMap { fileHandle -> EventLoopFuture<S3.GetObjectOutput> in
-            let request = S3.GetObjectRequest(bucket: from.bucket, key: from.key, options: options)
-            return self.s3.getObjectStreaming(request, logger: self.logger, on: eventLoop) { byteBuffer, eventLoop in
-                let bufferSize = byteBuffer.readableBytes
-                return self.fileIO.write(fileHandle: fileHandle, buffer: byteBuffer, eventLoop: eventLoop).flatMapThrowing { _ in
-                    bytesDownloaded += bufferSize
-                    try progress(Double(bytesDownloaded) / Double(fileSize))
+            } else {
+                // create folder to place file in, if it doesn't exist already
+                let folder: String
+                var isDirectory: ObjCBool = false
+                if let lastSlash = to.lastIndex(of: "/") {
+                    folder = String(to[..<lastSlash])
+                } else {
+                    folder = to
+                }
+                if FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory) {
+                    guard isDirectory.boolValue else { throw Error.failedToCreateFolder(folder) }
+                } else {
+                    try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
                 }
             }
-            .closeFileHandle(fileHandle)
-        }.map { _ in }
+            return to
+        }.get()
+        let fileHandle = try await self.fileIO.openFile(path: filename, mode: .write, flags: .allowFileCreation(), eventLoop: eventLoop).get()
+        defer {
+            try? fileHandle.close()
+        }
+        let request = S3.GetObjectRequest(bucket: from.bucket, key: from.key, options: options)
+        let response = try await self.s3.getObject(request, logger: self.logger)
+        var bytesDownloaded = 0
+        let fileSize = response.contentLength ?? 1
+        for try await buffer in response.body {
+            let bufferSize = buffer.readableBytes
+            try await self.fileIO.write(fileHandle: fileHandle, buffer: buffer, eventLoop: eventLoop).get()
+            progress(Double(bytesDownloaded) / Double(fileSize))
+        }
     }
 
     /// Copy from S3 file, to S3 file
@@ -256,29 +237,26 @@ public class S3FileTransferManager {
         to: S3File,
         fileSize: Int? = nil,
         options: CopyOptions = .init()
-    ) -> EventLoopFuture<Void> {
+    ) async throws {
         self.logger.debug("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
         let copySource = "/\(from.bucket)/\(from.key)".addingPercentEncoding(withAllowedCharacters: Self.pathAllowedCharacters)!
         let request = S3.CopyObjectRequest(bucket: to.bucket, copySource: copySource, key: to.key, options: options)
 
-        let fileSizeFuture: EventLoopFuture<Int>
-        if let fileSize = fileSize {
-            fileSizeFuture = eventLoop.makeSucceededFuture(fileSize)
-        } else {
-            let headRequest = S3.HeadObjectRequest(bucket: from.bucket, key: from.key)
-            fileSizeFuture = self.s3.headObject(headRequest, on: eventLoop).map { response in Int(response.contentLength!) }
-        }
-        return fileSizeFuture.flatMap { fileSize -> EventLoopFuture<Void> in
-            if fileSize > self.configuration.multipartThreshold {
-                return self.s3.multipartCopy(request, objectSize: fileSize, partSize: self.configuration.multipartPartSize)
-                    .map { _ in }
+        do {
+            let calculatedFileSize: Int
+            if let fileSize = fileSize  {
+                calculatedFileSize = fileSize
             } else {
-                return self.s3.copyObject(request, logger: self.logger)
-                    .map { _ in }
+                let headRequest = S3.HeadObjectRequest(bucket: from.bucket, key: from.key)
+                calculatedFileSize = try await numericCast(self.s3.headObject(headRequest, logger: self.logger).contentLength ?? 1)
             }
-        }
-        .flatMapErrorThrowing { error in
+            if calculatedFileSize > self.configuration.multipartThreshold {
+                _ = try await self.s3.multipartCopy(request, partSize: self.configuration.multipartPartSize, logger: self.logger)
+            } else {
+                _ = try await self.s3.copyObject(request, logger: self.logger)
+            }
+        } catch {
             if let error = error as? S3ErrorType, error == .notFound {
                 throw Error.fileDoesNotExist(String(describing: from))
             }
