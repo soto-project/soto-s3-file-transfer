@@ -54,6 +54,18 @@ public class S3FileTransferManager {
         let transfers: [(from: S3FileDescriptor, to: String)]
     }
 
+    /// List of file uploads to perform. This is return in a uploadFailed
+    /// error and can be passed to the resume function to resume the download
+    public struct UploadOperation {
+        let transfers: [(from: FileDescriptor, to: S3File)]
+    }
+
+    /// List of file copies to perform. This is return in a copyFailed
+    /// error and can be passed to the resume function to resume the download
+    public struct CopyOperation {
+        let transfers: [(from: S3FileDescriptor, to: S3File)]
+    }
+
     /// Errors created by S3TransferManager
     public enum Error: Swift.Error {
         /// File you referenced doesn't exist
@@ -66,6 +78,10 @@ public class S3FileTransferManager {
         case fileFolderClash(String, String)
         /// download failed
         case downloadFailed(Swift.Error, DownloadOperation)
+        /// upload failed
+        case uploadFailed(Swift.Error, UploadOperation)
+        /// copy failed
+        case copyFailed(Swift.Error, CopyOperation)
     }
 
     /// S3 service object
@@ -78,8 +94,6 @@ public class S3FileTransferManager {
     public let configuration: Configuration
     /// Logger
     public let logger: Logger
-    /// how class created its thread pool
-    let threadPoolProvider: S3.ThreadPoolProvider
     /// Have we shutdown the Manager
     internal let isShutdown = ManagedAtomic(false) // <Bool>.makeAtomic(value: false)
 
@@ -112,7 +126,7 @@ public class S3FileTransferManager {
         from: String,
         to: S3File,
         options: PutOptions = .init(),
-        progress: @escaping @Sendable (Double) -> Void = { _ in }
+        progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
     ) async throws {
         self.logger.debug("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
@@ -132,7 +146,7 @@ public class S3FileTransferManager {
                 logger: self.logger,
                 progress: progress
             )
-            progress(1.0)
+            try? await progress(1.0)
         } else {
             let fileIO = NonBlockingFileIO(threadPool: self.threadPool)
             let (fileHandle, fileRegion) = try await fileIO.openFile(path: from, eventLoop: eventLoop).get()
@@ -154,7 +168,7 @@ public class S3FileTransferManager {
              }*/
             let request = S3.PutObjectRequest(body: body, bucket: to.bucket, key: to.key, options: options)
             _ = try await self.s3.putObject(request, logger: self.logger)
-            progress(1.0)
+            try? await progress(1.0)
         }
     }
 
@@ -168,7 +182,7 @@ public class S3FileTransferManager {
         from: S3File,
         to: String,
         options: GetOptions = .init(),
-        progress: @escaping (Double) -> Void = { _ in }
+        progress: @escaping (Double) async throws -> Void = { _ in }
     ) async throws {
         self.logger.debug("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
@@ -219,9 +233,9 @@ public class S3FileTransferManager {
         var bytesDownloaded = 0
         let fileSize = response.contentLength ?? 1
         for try await buffer in response.body {
-            let bufferSize = buffer.readableBytes
+            bytesDownloaded += buffer.readableBytes
             try await self.fileIO.write(fileHandle: fileHandle, buffer: buffer, eventLoop: eventLoop).get()
-            progress(Double(bytesDownloaded) / Double(fileSize))
+            try await progress(Double(bytesDownloaded) / Double(fileSize))
         }
     }
 
@@ -239,13 +253,12 @@ public class S3FileTransferManager {
         options: CopyOptions = .init()
     ) async throws {
         self.logger.debug("Copy from: \(from) to \(to)")
-        let eventLoop = self.s3.eventLoopGroup.next()
         let copySource = "/\(from.bucket)/\(from.key)".addingPercentEncoding(withAllowedCharacters: Self.pathAllowedCharacters)!
         let request = S3.CopyObjectRequest(bucket: to.bucket, copySource: copySource, key: to.key, options: options)
 
         do {
             let calculatedFileSize: Int
-            if let fileSize = fileSize  {
+            if let fileSize = fileSize {
                 calculatedFileSize = fileSize
             } else {
                 let headRequest = S3.HeadObjectRequest(bucket: from.bucket, key: from.key)
@@ -273,28 +286,12 @@ public class S3FileTransferManager {
         from folder: String,
         to s3Folder: S3Folder,
         options: PutOptions = .init(),
-        progress: @escaping (Double) throws -> Void = { _ in }
-    ) -> EventLoopFuture<Void> {
-        let eventLoop = self.s3.eventLoopGroup.next()
-        return listFiles(in: folder)
-            .flatMap { files in
-                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
-                let folderResolved = URL(fileURLWithPath: folder).standardizedFileURL.resolvingSymlinksInPath()
-                let transfers = Self.targetFiles(files: files, from: folderResolved.path, to: s3Folder)
-                let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
-                transfers.forEach { transfer in
-                    taskQueue.submitTask {
-                        self.copy(from: transfer.from.name, to: transfer.to, options: options) {
-                            try folderProgress.updateProgress(transfer.from.name, progress: $0)
-                        }.map { _ in
-                            folderProgress.setFileUploaded(transfer.from.name)
-                        }
-                    }
-                }
-                return self.complete(taskQueue: taskQueue).map { _ in
-                    assert(folderProgress.finished == true)
-                }
-            }
+        progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
+    ) async throws {
+        let files = try await listFiles(in: folder)
+        let folderResolved = URL(fileURLWithPath: folder).standardizedFileURL.resolvingSymlinksInPath()
+        let transfers = Self.targetFiles(files: files, from: folderResolved.path, to: s3Folder)
+        try await self.copy(transfers, options: options, progress: progress)
     }
 
     /// Copy from S3 folder, to local folder
@@ -306,21 +303,12 @@ public class S3FileTransferManager {
         from s3Folder: S3Folder,
         to folder: String,
         options: GetOptions = .init(),
-        progress: @escaping (Double) throws -> Void = { _ in }
-    ) -> EventLoopFuture<Void> {
-        let eventLoop = self.s3.eventLoopGroup.next()
-        return listFiles(in: s3Folder)
-            .flatMapThrowing { try self.validateFileList($0, ignoreClashes: options.ignoreFileFolderClashes) }
-            .flatMap { files in
-                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
-                let transfers = Self.targetFiles(files: files, from: s3Folder, to: folder)
-                return self.copy(
-                    transfers: transfers,
-                    taskQueue: taskQueue,
-                    options: options,
-                    progress: progress
-                )
-            }
+        progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
+    ) async throws {
+        let files = try await listFiles(in: s3Folder)
+        let validatedFiles = try self.validateFileList(files, ignoreClashes: options.ignoreFileFolderClashes)
+        let transfers = Self.targetFiles(files: validatedFiles, from: s3Folder, to: folder)
+        try await self.copy(transfers, options: options, progress: progress)
     }
 
     /// Copy from S3 folder, to S3 folder
@@ -331,18 +319,12 @@ public class S3FileTransferManager {
     public func copy(
         from srcFolder: S3Folder,
         to destFolder: S3Folder,
-        options: CopyOptions = .init()
-    ) -> EventLoopFuture<Void> {
-        let eventLoop = self.s3.eventLoopGroup.next()
-        return listFiles(in: srcFolder)
-            .flatMap { files in
-                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
-                let transfers = Self.targetFiles(files: files, from: srcFolder, to: destFolder)
-                transfers.forEach { transfer in
-                    taskQueue.submitTask { self.copy(from: transfer.from.file, to: transfer.to, fileSize: transfer.from.size, options: options) }
-                }
-                return self.complete(taskQueue: taskQueue)
-            }
+        options: CopyOptions = .init(),
+        progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
+    ) async throws {
+        let files = try await listFiles(in: srcFolder)
+        let transfers = Self.targetFiles(files: files, from: srcFolder, to: destFolder)
+        try await self.copy(transfers, options: options, progress: progress)
     }
 
     /// Sync from local folder, to S3 folder.
@@ -360,49 +342,33 @@ public class S3FileTransferManager {
         to s3Folder: S3Folder,
         delete: Bool,
         options: PutOptions = .init(),
-        progress: @escaping (Double) throws -> Void = { _ in }
-    ) -> EventLoopFuture<Void> {
-        let eventLoop = self.s3.eventLoopGroup.next()
-
-        return listFiles(in: folder).and(listFiles(in: s3Folder))
-            .flatMap { files, s3Files in
-                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
-                let folderResolved = URL(fileURLWithPath: folder).standardizedFileURL.resolvingSymlinksInPath()
-                let targetFiles = Self.targetFiles(files: files, from: folderResolved.path, to: s3Folder)
-                let s3KeyMap = Dictionary(uniqueKeysWithValues: s3Files.map { ($0.file.key, $0) })
-                let transfers = targetFiles.compactMap { transfer -> (from: FileDescriptor, to: S3File)? in
-                    // does file exist on S3
-                    guard let s3File = s3KeyMap[transfer.to.key] else { return transfer }
-                    // does file on S3 have a later date
-                    guard s3File.modificationDate > transfer.from.modificationDate else { return transfer }
+        progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
+    ) async throws {
+        let files = try await listFiles(in: folder)
+        let s3Files = try await listFiles(in: s3Folder)
+        let folderResolved = URL(fileURLWithPath: folder).standardizedFileURL.resolvingSymlinksInPath()
+        let targetFiles = Self.targetFiles(files: files, from: folderResolved.path, to: s3Folder)
+        let s3KeyMap = Dictionary(uniqueKeysWithValues: s3Files.map { ($0.file.key, $0) })
+        let transfers = targetFiles.compactMap { transfer -> (from: FileDescriptor, to: S3File)? in
+            // does file exist on S3
+            guard let s3File = s3KeyMap[transfer.to.key] else { return transfer }
+            // does file on S3 have a later date
+            guard s3File.modificationDate > transfer.from.modificationDate else { return transfer }
+            return nil
+        }
+        try await self.copy(transfers, options: options, progress: progress)
+        // construct list of files to delete, if we are doing deletion
+        if delete == true {
+            let targetKeys = Set(targetFiles.map { $0.to.key })
+            let deletions = s3Files.compactMap { s3File -> S3File? in
+                if targetKeys.contains(s3File.file.key) {
                     return nil
-                }
-                let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
-                transfers.forEach { transfer in
-                    taskQueue.submitTask {
-                        self.copy(from: transfer.from.name, to: transfer.to, options: options) {
-                            try folderProgress.updateProgress(transfer.from.name, progress: $0)
-                        }.map { _ in
-                            folderProgress.setFileUploaded(transfer.from.name)
-                        }
-                    }
-                }
-                // construct list of files to delete, if we are doing deletion
-                if delete == true {
-                    let targetKeys = Set(targetFiles.map { $0.to.key })
-                    let deletions = s3Files.compactMap { s3File -> S3File? in
-                        if targetKeys.contains(s3File.file.key) {
-                            return nil
-                        } else {
-                            return s3File.file
-                        }
-                    }
-                    deletions.forEach { deletion in taskQueue.submitTask { self.delete(deletion) } }
-                }
-                return self.complete(taskQueue: taskQueue).map { _ in
-                    assert(folderProgress.finished == true)
+                } else {
+                    return s3File.file
                 }
             }
+            try await self.delete(deletions)
+        }
     }
 
     /// Sync from S3 folder, to local folder.
@@ -420,42 +386,42 @@ public class S3FileTransferManager {
         to folder: String,
         delete: Bool,
         options: GetOptions = .init(),
-        progress: @escaping (Double) throws -> Void = { _ in }
-    ) -> EventLoopFuture<Void> {
-        let eventLoop = self.s3.eventLoopGroup.next()
-
-        return listFiles(in: folder)
-            .and(listFiles(in: s3Folder).flatMapThrowing { try self.validateFileList($0, ignoreClashes: options.ignoreFileFolderClashes) })
-            .flatMap { files, s3Files in
-                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
-                let targetFiles = Self.targetFiles(files: s3Files, from: s3Folder, to: folder)
-                let fileNameMap = Dictionary(uniqueKeysWithValues: files.map { ($0.name, $0) })
-                let transfers = targetFiles.compactMap { transfer -> (from: S3FileDescriptor, to: String)? in
-                    // does file exist locally
-                    guard let file = fileNameMap[transfer.to] else { return transfer }
-                    // does local file have a later date
-                    guard file.modificationDate > transfer.from.modificationDate else { return transfer }
+        progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
+    ) async throws {
+        let files = try await listFiles(in: folder)
+        let s3Files = try await listFiles(in: s3Folder)
+        let validatedS3Files = try self.validateFileList(s3Files, ignoreClashes: options.ignoreFileFolderClashes)
+        let targetFiles = Self.targetFiles(files: validatedS3Files, from: s3Folder, to: folder)
+        let fileNameMap = Dictionary(uniqueKeysWithValues: files.map { ($0.name, $0) })
+        let transfers = targetFiles.compactMap { transfer -> (from: S3FileDescriptor, to: String)? in
+            // does file exist locally
+            guard let file = fileNameMap[transfer.to] else { return transfer }
+            // does local file have a later date
+            guard file.modificationDate > transfer.from.modificationDate else { return transfer }
+            return nil
+        }
+        // construct list of files to delete, if we are doing deletion
+        if delete == true {
+            let targetTos = Set(targetFiles.map { $0.to })
+            let deletions = files.compactMap { file -> String? in
+                if targetTos.contains(file.name) {
                     return nil
+                } else {
+                    return file.name
                 }
-                // construct list of files to delete, if we are doing deletion
-                if delete == true {
-                    let targetTos = Set(targetFiles.map { $0.to })
-                    let deletions = files.compactMap { file -> String? in
-                        if targetTos.contains(file.name) {
-                            return nil
-                        } else {
-                            return file.name
-                        }
-                    }
-                    deletions.forEach { deletion in taskQueue.submitTask { self.delete(deletion) } }
-                }
-                return self.copy(
-                    transfers: transfers,
-                    taskQueue: taskQueue,
-                    options: options,
-                    progress: progress
-                )
             }
+            try await deletions.concurrentForEach(
+                maxConcurrentTasks: self.configuration.maxConcurrentTasks,
+                cancelOnError: self.configuration.cancelOnError
+            ) {
+                try await self.delete($0)
+            }
+        }
+        try await self.copy(
+            transfers,
+            options: options,
+            progress: progress
+        )
     }
 
     /// Sync from S3 folder, to another S3 folder.
@@ -472,39 +438,60 @@ public class S3FileTransferManager {
         from srcFolder: S3Folder,
         to destFolder: S3Folder,
         delete: Bool,
-        options: CopyOptions = .init()
-    ) -> EventLoopFuture<Void> {
-        let eventLoop = self.s3.eventLoopGroup.next()
-
-        return listFiles(in: srcFolder).and(listFiles(in: destFolder))
-            .flatMap { srcFiles, destFiles in
-                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
-                let targetFiles = Self.targetFiles(files: srcFiles, from: srcFolder, to: destFolder)
-                let destKeyMap = Dictionary(uniqueKeysWithValues: destFiles.map { ($0.file.key, $0) })
-                let transfers = targetFiles.compactMap { transfer -> (from: S3FileDescriptor, to: S3File)? in
-                    // does file exist in destination folder
-                    guard let file = destKeyMap[transfer.to.key] else { return transfer }
-                    // does local file have a later date
-                    guard file.modificationDate > transfer.from.modificationDate else { return transfer }
+        options: CopyOptions = .init(),
+        progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
+    ) async throws {
+        let srcFiles = try await listFiles(in: srcFolder)
+        let destFiles = try await listFiles(in: destFolder)
+        let targetFiles = Self.targetFiles(files: srcFiles, from: srcFolder, to: destFolder)
+        let destKeyMap = Dictionary(uniqueKeysWithValues: destFiles.map { ($0.file.key, $0) })
+        let transfers = targetFiles.compactMap { transfer -> (from: S3FileDescriptor, to: S3File)? in
+            // does file exist in destination folder
+            guard let file = destKeyMap[transfer.to.key] else { return transfer }
+            // does local file have a later date
+            guard file.modificationDate > transfer.from.modificationDate else { return transfer }
+            return nil
+        }
+        try await self.copy(
+            transfers,
+            options: options,
+            progress: progress
+        )
+        // construct list of files to delete, if we are doing deletion
+        if delete == true {
+            let targetKeys = Set(targetFiles.map { $0.to.key })
+            let deletions = destFiles.compactMap { file -> S3File? in
+                if targetKeys.contains(file.file.key) {
                     return nil
+                } else {
+                    return file.file
                 }
-                transfers.forEach { transfer in
-                    taskQueue.submitTask { self.copy(from: transfer.from.file, to: transfer.to, fileSize: transfer.from.size, options: options) }
-                }
-                // construct list of files to delete, if we are doing deletion
-                if delete == true {
-                    let targetKeys = Set(targetFiles.map { $0.to.key })
-                    let deletions = destFiles.compactMap { file -> S3File? in
-                        if targetKeys.contains(file.file.key) {
-                            return nil
-                        } else {
-                            return file.file
-                        }
-                    }
-                    deletions.forEach { deletion in taskQueue.submitTask { self.delete(deletion) } }
-                }
-                return self.complete(taskQueue: taskQueue)
             }
+            try await self.delete(deletions)
+        }
+    }
+
+    /// Resume upload to S3 that previously failed
+    ///
+    /// When a copy or sync to S3 operation fails it will throw a
+    /// S3TransferManager.Error.uploadFailed error. This contains a `UploadOperation`.
+    /// struct. You can resume the upload by passing the struct to the this function.
+    ///
+    /// - Parameters:
+    ///   - download: Details of remaining downloads to perform
+    ///   - options: Download options
+    ///   - progress: Progress function
+    /// - Returns: EventLoopFuture fulfilled when operation is complete
+    public func resume(
+        download: UploadOperation,
+        options: PutOptions = .init(),
+        progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
+    ) async throws {
+        return try await self.copy(
+            download.transfers,
+            options: options,
+            progress: progress
+        )
     }
 
     /// Resume download from S3 that previously failed
@@ -521,34 +508,52 @@ public class S3FileTransferManager {
     public func resume(
         download: DownloadOperation,
         options: GetOptions = .init(),
-        progress: @escaping (Double) throws -> Void = { _ in }
-    ) -> EventLoopFuture<Void> {
-        let eventLoop = self.s3.eventLoopGroup.next()
+        progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
+    ) async throws {
+        return try await self.copy(
+            download.transfers,
+            options: options,
+            progress: progress
+        )
+    }
 
-        let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
-        return self.copy(
-            transfers: download.transfers,
-            taskQueue: taskQueue,
+    /// Resume copy from S3 to S3 that previously failed
+    ///
+    /// When a copy or sync to S3 operation fails it will throw a
+    /// S3TransferManager.Error.copyFailed error. This contains a `CopyOperation`.
+    /// struct. You can resume the copy by passing the struct to the this function.
+    ///
+    /// - Parameters:
+    ///   - download: Details of remaining downloads to perform
+    ///   - options: Download options
+    ///   - progress: Progress function
+    /// - Returns: EventLoopFuture fulfilled when operation is complete
+    public func resume(
+        download: CopyOperation,
+        options: CopyOptions = .init(),
+        progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
+    ) async throws {
+        return try await self.copy(
+            download.transfers,
             options: options,
             progress: progress
         )
     }
 
     /// delete a file on S3
-    public func delete(_ s3File: S3File) -> EventLoopFuture<Void> {
+    public func delete(_ s3File: S3File) async throws {
         self.logger.debug("Deleting \(s3File)")
-        return self.s3.deleteObject(.init(bucket: s3File.bucket, key: s3File.key), logger: self.logger).map { _ in }
+        _ = try await self.s3.deleteObject(.init(bucket: s3File.bucket, key: s3File.key), logger: self.logger)
     }
 
     /// delete a folder on S3
-    public func delete(_ s3Folder: S3Folder) -> EventLoopFuture<Void> {
-        let eventLoop = self.s3.eventLoopGroup.next()
-        return listFiles(in: s3Folder)
-            .flatMap { files in
-                let taskQueue = TaskQueue<Void>(maxConcurrentTasks: self.configuration.maxConcurrentTasks, on: eventLoop)
-                files.forEach { deletion in taskQueue.submitTask { self.delete(deletion.file) } }
-                return self.complete(taskQueue: taskQueue)
-            }
+    public func delete(_ s3Folder: S3Folder) async throws {
+        let files = try await listFiles(in: s3Folder)
+        let request = S3.DeleteObjectsRequest(
+            bucket: s3Folder.bucket,
+            delete: .init(objects: files.map { .init(key: $0.file.key) })
+        )
+        _ = try await self.s3.deleteObjects(request, logger: self.logger)
     }
 }
 
@@ -565,22 +570,10 @@ extension S3FileTransferManager {
         let size: Int
     }
 
-    /// Wait on all tasks succeeding. If there is an error the operation will either continue or cancel depending on `Configuration.cancelOnError`
-    func complete<T>(taskQueue: TaskQueue<T>) -> EventLoopFuture<Void> {
-        taskQueue.andAllSucceed()
-            .flatMapError { error in
-                if self.configuration.cancelOnError {
-                    return taskQueue.cancel().flatMapThrowing { throw error }
-                } else {
-                    return taskQueue.flush().flatMapThrowing { throw error }
-                }
-            }
-    }
-
     /// List files in local folder
-    func listFiles(in folder: String) -> EventLoopFuture<[FileDescriptor]> {
+    func listFiles(in folder: String) async throws -> [FileDescriptor] {
         let eventLoop = self.s3.eventLoopGroup.next()
-        return self.threadPool.runIfActive(eventLoop: eventLoop) {
+        return try await self.threadPool.runIfActive(eventLoop: eventLoop) {
             var files: [FileDescriptor] = []
             let path = URL(fileURLWithPath: folder)
             guard let fileEnumerator = FileManager.default.enumerator(
@@ -604,14 +597,15 @@ extension S3FileTransferManager {
                 files.append(fileDescriptor)
             }
             return files
-        }
+        }.get()
     }
 
     /// List files in S3 folder
-    func listFiles(in folder: S3Folder) -> EventLoopFuture<[S3FileDescriptor]> {
+    func listFiles(in folder: S3Folder) async throws -> [S3FileDescriptor] {
         let request = S3.ListObjectsV2Request(bucket: folder.bucket, prefix: folder.key)
-        return self.s3.listObjectsV2Paginator(request, [], logger: self.logger) { accumulator, response, eventLoop in
-            let files: [S3FileDescriptor] = response.contents?.compactMap {
+        var files: [S3FileDescriptor] = []
+        for try await objects in self.s3.listObjectsV2Paginator(request, logger: self.logger) {
+            let newFiles: [S3FileDescriptor] = objects.contents?.compactMap {
                 guard let key = $0.key,
                       let lastModified = $0.lastModified,
                       let fileSize = $0.size else { return nil }
@@ -621,8 +615,9 @@ extension S3FileTransferManager {
                     size: Int(fileSize)
                 )
             } ?? []
-            return eventLoop.makeSucceededFuture((true, accumulator + files))
+            files += newFiles
         }
+        return files
     }
 
     /// Validate we can save file list from S3 to file system
@@ -648,49 +643,209 @@ extension S3FileTransferManager {
         }
     }
 
-    /// Internal version of sync, with folder progress and task queue setup
+    /// Internal version of copy from local file system to S3
     func copy(
-        transfers: [(from: S3FileDescriptor, to: String)],
-        taskQueue: TaskQueue<Void>,
-        options: GetOptions,
-        progress: @escaping (Double) throws -> Void
-    ) -> EventLoopFuture<Void> {
-        var failedTransfers: [(from: S3FileDescriptor, to: String)] = []
-        let lock = NIOLock()
-        let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
-        let transfersComplete = transfers.map { transfer in
-            taskQueue.submitTask {
-                self.copy(from: transfer.from.file, to: transfer.to, options: options) {
-                    try folderProgress.updateProgress(transfer.from.file.key, progress: $0)
-                }.map { _ in
-                    folderProgress.setFileUploaded(transfer.from.file.key)
-                }
-            }.flatMapErrorThrowing { error in
-                lock.withLock {
-                    failedTransfers.append(transfer)
-                }
-                throw error
-            }
+        _ transfers: [(from: FileDescriptor, to: S3File)],
+        options: PutOptions,
+        progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
+    ) async throws {
+        enum UploadTaskResult {
+            case success
+            case failed(error: Swift.Error, from: FileDescriptor, to: S3File)
         }
-        return self.complete(taskQueue: taskQueue).map { _ in
-            assert(folderProgress.finished == true)
-        }.flatMapError { error in
-            return EventLoopFuture.andAllComplete(transfersComplete, on: taskQueue.eventLoop).flatMapThrowing {
-                throw Error.downloadFailed(error, .init(transfers: failedTransfers))
+
+        let result = await withTaskGroup(of: UploadTaskResult.self) { group in
+            var count = 0
+            var failedTransfers: [(from: FileDescriptor, to: S3File)] = []
+            var error: Swift.Error?
+            let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
+
+            for transfer in transfers {
+                group.addTask {
+                    do {
+                        try await self.copy(from: transfer.from.name, to: transfer.to, options: options) {
+                            try await folderProgress.updateProgress(transfer.from.name, progress: $0)
+                        }
+                        await folderProgress.setFileUploaded(transfer.from.name)
+                        return .success
+                    } catch {
+                        return .failed(error: error, from: transfer.from, to: transfer.to)
+                    }
+                }
+                count += 1
+                if count > self.configuration.maxConcurrentTasks {
+                    let result = await group.first { _ in true }
+                    if case .failed(let error2, let from, let to) = result {
+                        error = error2
+                        failedTransfers.append((from: from, to: to))
+                        if self.configuration.cancelOnError {
+                            group.cancelAll()
+                            return (error: error, failed: failedTransfers)
+                        }
+                    }
+                }
             }
+            for await result in group {
+                if case .failed(let error2, let from, let to) = result {
+                    error = error2
+                    failedTransfers.append((from: from, to: to))
+                    if self.configuration.cancelOnError {
+                        group.cancelAll()
+                        break
+                    }
+                }
+            }
+            return (error: error, failed: failedTransfers)
+        }
+        if let error = result.error {
+            throw Error.uploadFailed(error, .init(transfers: result.failed))
+        }
+    }
+
+    /// Internal version of copy from S3 to local file system
+    func copy(
+        _ transfers: [(from: S3FileDescriptor, to: String)],
+        options: GetOptions,
+        progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
+    ) async throws {
+        enum DownloadTaskResult {
+            case success
+            case failed(error: Swift.Error, from: S3FileDescriptor, to: String)
+        }
+
+        let result = await withTaskGroup(of: DownloadTaskResult.self) { group in
+            var count = 0
+            var failedTransfers: [(from: S3FileDescriptor, to: String)] = []
+            var error: Swift.Error?
+            let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
+
+            for transfer in transfers {
+                group.addTask {
+                    do {
+                        try await self.copy(from: transfer.from.file, to: transfer.to, options: options) {
+                            try await folderProgress.updateProgress(transfer.from.file.key, progress: $0)
+                        }
+                        await folderProgress.setFileUploaded(transfer.from.file.key)
+                        return .success
+                    } catch {
+                        return .failed(error: error, from: transfer.from, to: transfer.to)
+                    }
+                }
+                count += 1
+                if count > self.configuration.maxConcurrentTasks {
+                    let result = await group.first { _ in true }
+                    if case .failed(let error2, let from, let to) = result {
+                        error = error2
+                        failedTransfers.append((from: from, to: to))
+                        if self.configuration.cancelOnError {
+                            group.cancelAll()
+                            return (error: error, failed: failedTransfers)
+                        }
+                    }
+                }
+            }
+            for await result in group {
+                if case .failed(let error2, let from, let to) = result {
+                    error = error2
+                    failedTransfers.append((from: from, to: to))
+                    if self.configuration.cancelOnError {
+                        group.cancelAll()
+                        break
+                    }
+                }
+            }
+            return (error: error, failed: failedTransfers)
+        }
+        if let error = result.error {
+            throw Error.downloadFailed(error, .init(transfers: result.failed))
+        }
+    }
+
+    /// Internal version of copy from S3 to S3
+    func copy(
+        _ transfers: [(from: S3FileDescriptor, to: S3File)],
+        options: CopyOptions,
+        progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
+    ) async throws {
+        enum CopyTaskResult {
+            case success
+            case failed(error: Swift.Error, from: S3FileDescriptor, to: S3File)
+        }
+
+        let result = await withTaskGroup(of: CopyTaskResult.self) { group in
+            var count = 0
+            var failedTransfers: [(from: S3FileDescriptor, to: S3File)] = []
+            var error: Swift.Error?
+            let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
+
+            for transfer in transfers {
+                group.addTask {
+                    do {
+                        try await self.copy(
+                            from: transfer.from.file,
+                            to: transfer.to,
+                            fileSize: transfer.from.size,
+                            options: options
+                        )
+                        await folderProgress.setFileUploaded(transfer.from.file.key)
+                        return .success
+                    } catch {
+                        return .failed(error: error, from: transfer.from, to: transfer.to)
+                    }
+                }
+                count += 1
+                if count > self.configuration.maxConcurrentTasks {
+                    let result = await group.first { _ in true }
+                    if case .failed(let error2, let from, let to) = result {
+                        error = error2
+                        failedTransfers.append((from: from, to: to))
+                        if self.configuration.cancelOnError {
+                            group.cancelAll()
+                            return (error: error, failed: failedTransfers)
+                        }
+                    }
+                }
+            }
+            for await result in group {
+                if case .failed(let error2, let from, let to) = result {
+                    error = error2
+                    failedTransfers.append((from: from, to: to))
+                    if self.configuration.cancelOnError {
+                        group.cancelAll()
+                        break
+                    }
+                }
+            }
+            return (error: error, failed: failedTransfers)
+        }
+        if let error = result.error {
+            throw Error.copyFailed(error, .init(transfers: result.failed))
         }
     }
 
     /// delete a local file
-    func delete(_ file: String) -> EventLoopFuture<Void> {
+    func delete(_ file: String) async throws {
         self.logger.debug("Deleting \(file)")
         let eventLoop = self.s3.eventLoopGroup.next()
-        return self.threadPool.runIfActive(eventLoop: eventLoop) {
+        try await self.threadPool.runIfActive(eventLoop: eventLoop) {
             try FileManager.default.removeItem(atPath: file)
-        }
+        }.get()
     }
 
-    /// convert file descriptors to equivalent S3 file descriptors when copying one folder to another. Function assumes the files have srcFolder prefixed
+    /// delete files on S3.
+    ///
+    /// This assumes all files are in the same bucket
+    func delete(_ s3Files: [S3File]) async throws {
+        guard let first = s3Files.first else { return }
+        let request = S3.DeleteObjectsRequest(
+            bucket: first.bucket,
+            delete: .init(objects: s3Files.map { .init(key: $0.key) })
+        )
+        _ = try await self.s3.deleteObjects(request, logger: self.logger)
+    }
+
+    /// convert file descriptors to equivalent S3 file descriptors when copying one folder
+    /// to another. Function assumes the files have srcFolder prefixed
     static func targetFiles(files: [FileDescriptor], from srcFolder: String, to destFolder: S3Folder) -> [(from: FileDescriptor, to: S3File)] {
         let srcFolder = srcFolder.appendingSuffixIfNeeded("/")
         return files.map { file in
@@ -699,8 +854,9 @@ extension S3FileTransferManager {
         }
     }
 
-    /// convert S3 file descriptors to equivalent file descriptors when copying files from the S3 folder to a local folder. Function assumes the S3 files have
-    /// the source path prefixed
+    /// convert S3 file descriptors to equivalent file descriptors when copying files from
+    /// the S3 folder to a local folder. Function assumes the S3 files have the source path
+    /// prefixed
     static func targetFiles(files: [S3FileDescriptor], from srcFolder: S3Folder, to destFolder: String) -> [(from: S3FileDescriptor, to: String)] {
         let destFolder = destFolder.appendingSuffixIfNeeded("/")
         return files.map { file in
@@ -709,8 +865,9 @@ extension S3FileTransferManager {
         }
     }
 
-    /// convert S3 file descriptors to equivalent S3 file descriptors when copying files from the S3 folder to another S3 folder. Function assumes the S3 files have
-    /// the source path prefixed
+    /// convert S3 file descriptors to equivalent S3 file descriptors when copying files from
+    /// the S3 folder to another S3 folder. Function assumes the S3 files have the source path
+    /// prefixed
     static func targetFiles(files: [S3FileDescriptor], from srcFolder: S3Folder, to destFolder: S3Folder) -> [(from: S3FileDescriptor, to: S3File)] {
         return files.map { file in
             let pathRelative = file.file.key.removingPrefix(srcFolder.key)
@@ -721,15 +878,49 @@ extension S3FileTransferManager {
     static let pathAllowedCharacters = CharacterSet.urlPathAllowed.subtracting(.init(charactersIn: "+"))
 }
 
-extension EventLoopFuture {
-    func closeFileHandle(_ fileHandle: NIOFileHandle) -> EventLoopFuture<Value> {
-        return self.flatMapErrorThrowing { error in
-            try fileHandle.close()
-            throw error
+extension Array {
+    func concurrentForEach(
+        maxConcurrentTasks: Int,
+        cancelOnError: Bool,
+        _ operation: @escaping @Sendable (Element) async throws -> Void
+    ) async throws {
+        let result = await withTaskGroup(of: Result<Void, Swift.Error>.self) { group in
+            var count = 0
+            var result: Result<Void, Swift.Error> = .success(())
+            for element in self {
+                group.addTask {
+                    do {
+                        try await operation(element)
+                        return .success(())
+                    } catch {
+                        return .failure(error)
+                    }
+                }
+                count += 1
+                if count > maxConcurrentTasks {
+                    let taskResult = await group.first { _ in true }
+                    if case .failure(let error) = taskResult {
+                        result = .failure(error)
+                        if cancelOnError {
+                            group.cancelAll()
+                            return result
+                        }
+                    }
+                }
+            }
+            for await taskResult in group {
+                if case .failure = taskResult {
+                    result = taskResult
+                    if cancelOnError {
+                        group.cancelAll()
+                        return result
+                    }
+                }
+            }
+            return result
         }
-        .flatMapThrowing { rt -> Value in
-            try fileHandle.close()
-            return rt
+        if case .failure(let error) = result {
+            throw error
         }
     }
 }
