@@ -108,9 +108,9 @@ public class S3FileTransferManager {
         threadPoolProvider: S3.ThreadPoolProvider,
         configuration: Configuration = Configuration(),
         logger: Logger = AWSClient.loggingDisabled
-    ) async {
+    ) {
         self.s3 = s3
-        self.threadPool = await threadPoolProvider.threadPool
+        self.threadPool = threadPoolProvider.syncThreadPool
         self.fileIO = NonBlockingFileIO(threadPool: self.threadPool)
         self.configuration = configuration
         self.logger = logger
@@ -130,10 +130,15 @@ public class S3FileTransferManager {
     ) async throws {
         self.logger.debug("Copy from: \(from) to \(to)")
         let eventLoop = self.s3.eventLoopGroup.next()
-        let attributes = try await self.threadPool.runIfActive(eventLoop: eventLoop) {
-            try FileManager.default.attributesOfItem(atPath: from)
-        }.get()
-        let fileSize = attributes[.size] as? Int ?? 0
+        let fileSize: Int
+        do {
+            let attributes = try await self.threadPool.runIfActive(eventLoop: eventLoop) {
+                try FileManager.default.attributesOfItem(atPath: from)
+            }.get()
+            fileSize = attributes[.size] as? Int ?? 0
+        } catch {
+            throw Error.fileDoesNotExist(String(describing: from))
+        }
         // if file size is greater than multipart threshold then use multipart upload for uploading the file
         if fileSize > self.configuration.multipartThreshold {
             let request = S3.CreateMultipartUploadRequest(bucket: to.bucket, key: to.key, options: options)
