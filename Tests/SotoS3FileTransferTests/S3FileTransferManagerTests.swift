@@ -50,7 +50,7 @@ class S3TransferManagerXCTestCase: XCTestCase {
             region: .euwest1,
             endpoint: TestEnvironment.getEndPoint(environment: "LOCALSTACK_ENDPOINT")
         ).with(timeout: .seconds(30))
-        self.s3FileTransfer = .init(s3: self.s3, threadPoolProvider: .singleton, logger: Logger(label: "S3TransferTests"))
+        self.s3FileTransfer = .init(s3: self.s3, logger: Logger(label: "S3TransferTests"))
         XCTAssertNoThrow(try FileManager.default.createDirectory(atPath: self.tempFolder, withIntermediateDirectories: false))
     }
 
@@ -332,7 +332,6 @@ final class S3FileTransferManagerTests: S3TransferManagerXCTestCase {
         try await testBucket { bucket in
             let s3FileTransfer = S3FileTransferManager(
                 s3: Self.s3,
-                threadPoolProvider: .singleton,
                 configuration: .init(cancelOnError: true, maxConcurrentTasks: 2),
                 logger: Logger(label: "S3TransferTests")
             )
@@ -345,7 +344,6 @@ final class S3FileTransferManagerTests: S3TransferManagerXCTestCase {
         try await testBucket { bucket in
             let s3FileTransfer = S3FileTransferManager(
                 s3: Self.s3,
-                threadPoolProvider: .singleton,
                 configuration: .init(cancelOnError: false, maxConcurrentTasks: 2),
                 logger: Logger(label: "S3TransferTests")
             )
@@ -389,7 +387,6 @@ final class S3FileTransferManagerTests: S3TransferManagerXCTestCase {
         try await testBucket { bucket in
             let s3FileTransfer = S3FileTransferManager(
                 s3: Self.s3,
-                threadPoolProvider: .singleton,
                 configuration: .init(cancelOnError: true, maxConcurrentTasks: 4),
                 logger: Logger(label: "S3TransferTests")
             )

@@ -105,12 +105,12 @@ public class S3FileTransferManager {
     ///   - logger: Logger
     public init(
         s3: S3,
-        threadPoolProvider: S3.ThreadPoolProvider,
+        threadPool: NIOThreadPool = NIOThreadPool.singleton,
         configuration: Configuration = Configuration(),
         logger: Logger = AWSClient.loggingDisabled
     ) {
         self.s3 = s3
-        self.threadPool = threadPoolProvider.syncThreadPool
+        self.threadPool = threadPool
         self.fileIO = NonBlockingFileIO(threadPool: self.threadPool)
         self.configuration = configuration
         self.logger = logger
