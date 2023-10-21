@@ -685,7 +685,6 @@ extension S3FileTransferManager {
                         failedTransfers.append((from: from, to: to))
                         if self.configuration.cancelOnError {
                             group.cancelAll()
-                            return (error: error, failed: failedTransfers)
                         }
                     }
                 }
@@ -696,7 +695,6 @@ extension S3FileTransferManager {
                     failedTransfers.append((from: from, to: to))
                     if self.configuration.cancelOnError {
                         group.cancelAll()
-                        break
                     }
                 }
             }
@@ -744,7 +742,6 @@ extension S3FileTransferManager {
                         failedTransfers.append((from: from, to: to))
                         if self.configuration.cancelOnError {
                             group.cancelAll()
-                            return (error: error, failed: failedTransfers)
                         }
                     }
                 }
@@ -755,7 +752,6 @@ extension S3FileTransferManager {
                     failedTransfers.append((from: from, to: to))
                     if self.configuration.cancelOnError {
                         group.cancelAll()
-                        break
                     }
                 }
             }
@@ -806,7 +802,6 @@ extension S3FileTransferManager {
                         failedTransfers.append((from: from, to: to))
                         if self.configuration.cancelOnError {
                             group.cancelAll()
-                            return (error: error, failed: failedTransfers)
                         }
                     }
                 }
@@ -817,7 +812,6 @@ extension S3FileTransferManager {
                     failedTransfers.append((from: from, to: to))
                     if self.configuration.cancelOnError {
                         group.cancelAll()
-                        break
                     }
                 }
             }
@@ -908,7 +902,6 @@ extension Array {
                         result = .failure(error)
                         if cancelOnError {
                             group.cancelAll()
-                            return result
                         }
                     }
                 }
@@ -918,7 +911,6 @@ extension Array {
                     result = taskResult
                     if cancelOnError {
                         group.cancelAll()
-                        return result
                     }
                 }
             }
