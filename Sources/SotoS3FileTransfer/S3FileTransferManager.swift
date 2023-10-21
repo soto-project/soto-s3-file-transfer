@@ -166,11 +166,11 @@ public class S3FileTransferManager {
                     chunkSize: 64 * 1024,
                     byteBufferAllocator: self.s3.config.byteBufferAllocator,
                     eventLoop: eventLoop
-                ),
+                ).reportProgress { totalBytes in
+                    try await progress(Double(totalBytes) / Double(fileSize))
+                },
                 length: fileRegion.readableBytes
-            ) /* .fileHandle(fileHandle, offset: 0, size: fileSize, fileIO: self.fileIO) { downloaded in
-                 try progress(Double(downloaded) / Double(fileSize))
-             }*/
+            )
             let request = S3.PutObjectRequest(body: body, bucket: to.bucket, key: to.key, options: options)
             _ = try await self.s3.putObject(request, logger: self.logger)
             try? await progress(1.0)
