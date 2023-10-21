@@ -105,7 +105,7 @@ public class S3FileTransferManager {
     ///   - logger: Logger
     public init(
         s3: S3,
-        threadPool: NIOThreadPool = NIOThreadPool.singleton,
+        threadPool: NIOThreadPool = .singleton,
         configuration: Configuration = Configuration(),
         logger: Logger = AWSClient.loggingDisabled
     ) {
@@ -147,7 +147,7 @@ public class S3FileTransferManager {
                 partSize: self.configuration.multipartPartSize,
                 filename: from,
                 abortOnFail: true,
-                threadPoolProvider: .shared(self.threadPool),
+                threadPool: self.threadPool,
                 logger: self.logger,
                 progress: progress
             )
