@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 /// protocol for S3Path descriptor
-public protocol S3Path: Equatable, CustomStringConvertible {
+public protocol S3Path: Equatable, CustomStringConvertible, Sendable {
     /// s3 bucket name
     var bucket: String { get }
     /// path inside s3 bucket. Without leading forward slash
