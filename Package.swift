@@ -15,6 +15,10 @@
 
 import PackageDescription
 
+let swiftSettings: [SwiftSetting] = [
+    .enableExperimentalFeature("StrictConcurrency=complete"),
+]
+
 let package = Package(
     name: "soto-s3-file-transfer",
     platforms: [.macOS(.v10_15), .iOS(.v13), .tvOS(.v13), .watchOS(.v6)],
@@ -31,7 +35,7 @@ let package = Package(
             .product(name: "SotoS3", package: "soto"),
             .product(name: "Atomics", package: "swift-atomics"),
             .product(name: "Logging", package: "swift-log"),
-        ]),
+        ], swiftSettings: swiftSettings),
         .testTarget(name: "SotoS3FileTransferTests", dependencies: ["SotoS3FileTransfer"]),
     ]
 )

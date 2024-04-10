@@ -21,9 +21,9 @@ import NIOPosix
 import SotoS3
 
 /// S3 Transfer manager. Transfers files/folders back and forth between S3 and your local file system
-public class S3FileTransferManager {
+public final class S3FileTransferManager: Sendable {
     /// Configuration for S3 Transfer Manager
-    public struct Configuration {
+    public struct Configuration: Sendable {
         /// Cancel operations as soon as an error is found. Otherwise the operation will be attempt to finish all transfers
         let cancelOnError: Bool
         /// size file has to be before using multipart upload
@@ -50,19 +50,19 @@ public class S3FileTransferManager {
 
     /// List of file downloads to perform. This is return in a downloadFailed
     /// error and can be passed to the resume function to resume the download
-    public struct DownloadOperation {
+    public struct DownloadOperation: Sendable {
         let transfers: [(from: S3FileDescriptor, to: String)]
     }
 
     /// List of file uploads to perform. This is return in a uploadFailed
     /// error and can be passed to the resume function to resume the download
-    public struct UploadOperation {
+    public struct UploadOperation: Sendable {
         let transfers: [(from: FileDescriptor, to: S3File)]
     }
 
     /// List of file copies to perform. This is return in a copyFailed
     /// error and can be passed to the resume function to resume the download
-    public struct CopyOperation {
+    public struct CopyOperation: Sendable {
         let transfers: [(from: S3FileDescriptor, to: S3File)]
     }
 
@@ -131,10 +131,10 @@ public class S3FileTransferManager {
         self.logger.debug("Copy from: \(from) to \(to)")
         let fileSize: Int
         do {
-            let attributes = try await self.threadPool.runIfActive {
-                try FileManager.default.attributesOfItem(atPath: from)
+            fileSize = try await self.threadPool.runIfActive {
+                let attributes = try FileManager.default.attributesOfItem(atPath: from)
+                return attributes[.size] as? Int ?? 0
             }
-            fileSize = attributes[.size] as? Int ?? 0
         } catch {
             throw Error.fileDoesNotExist(String(describing: from))
         }
@@ -867,7 +867,7 @@ extension S3FileTransferManager {
     static let pathAllowedCharacters = CharacterSet.urlPathAllowed.subtracting(.init(charactersIn: "+"))
 }
 
-extension Array {
+extension Array where Element: Sendable {
     func concurrentForEach(
         maxConcurrentTasks: Int,
         cancelOnError: Bool,
