@@ -1,4 +1,4 @@
-// swift-tools-version:5.7
+// swift-tools-version:5.8
 //===----------------------------------------------------------------------===//
 //
 // This source file is part of the Soto for AWS open source project
@@ -22,7 +22,7 @@ let package = Package(
         .library(name: "SotoS3FileTransfer", targets: ["SotoS3FileTransfer"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/soto-project/soto.git", branch: "7.x.x"),
+        .package(url: "https://github.com/soto-project/soto.git", from: "7.0.0-beta.1"),
         .package(url: "https://github.com/apple/swift-atomics.git", from: "1.0.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0")
     ],

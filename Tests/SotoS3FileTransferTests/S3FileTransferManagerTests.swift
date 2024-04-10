@@ -42,15 +42,14 @@ class S3TransferManagerXCTestCase: XCTestCase {
         }
         self.client = AWSClient(
             credentialProvider: TestEnvironment.credentialProvider,
-            middleware: TestEnvironment.middlewares,
-            httpClientProvider: .createNew
+            middleware: TestEnvironment.middlewares
         )
         self.s3 = S3(
             client: self.client,
             region: .euwest1,
             endpoint: TestEnvironment.getEndPoint(environment: "LOCALSTACK_ENDPOINT")
         ).with(timeout: .seconds(30))
-        self.s3FileTransfer = .init(s3: self.s3, logger: Logger(label: "S3TransferTests"))
+        self.s3FileTransfer = .init(s3: self.s3, logger: TestEnvironment.logger)
         XCTAssertNoThrow(try FileManager.default.createDirectory(atPath: self.tempFolder, withIntermediateDirectories: false))
     }
 
@@ -68,7 +67,7 @@ class S3TransferManagerXCTestCase: XCTestCase {
     }
 
     static func deleteBucket(name: String, s3: S3) async throws {
-        let response = try await s3.listObjectsV2(.init(bucket: name), logger: TestEnvironment.logger)
+        let response = try await s3.listObjectsV2(.init(bucket: name, maxKeys: 2048), logger: TestEnvironment.logger)
         if let contents = response.contents {
             let request = S3.DeleteObjectsRequest(
                 bucket: name,

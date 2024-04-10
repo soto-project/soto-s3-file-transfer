@@ -129,12 +129,11 @@ public class S3FileTransferManager {
         progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
     ) async throws {
         self.logger.debug("Copy from: \(from) to \(to)")
-        let eventLoop = self.s3.eventLoopGroup.next()
         let fileSize: Int
         do {
-            let attributes = try await self.threadPool.runIfActive(eventLoop: eventLoop) {
+            let attributes = try await self.threadPool.runIfActive {
                 try FileManager.default.attributesOfItem(atPath: from)
-            }.get()
+            }
             fileSize = attributes[.size] as? Int ?? 0
         } catch {
             throw Error.fileDoesNotExist(String(describing: from))
@@ -154,26 +153,22 @@ public class S3FileTransferManager {
             try? await progress(1.0)
         } else {
             let fileIO = NonBlockingFileIO(threadPool: self.threadPool)
-            let (fileHandle, fileRegion) = try await fileIO.openFile(path: from, eventLoop: eventLoop).get()
-            defer {
-                try? fileHandle.close()
+            try await fileIO.withFileRegion(path: from) { region in
+                let body: AWSHTTPBody = .init(
+                    asyncSequence: FileByteBufferAsyncSequence(
+                        region.fileHandle,
+                        fileIO: fileIO,
+                        chunkSize: 64 * 1024,
+                        byteBufferAllocator: self.s3.config.byteBufferAllocator
+                    ).reportProgress { totalBytes in
+                        try await progress(Double(totalBytes) / Double(fileSize))
+                    },
+                    length: region.readableBytes
+                )
+                let request = S3.PutObjectRequest(body: body, bucket: to.bucket, key: to.key, options: options)
+                _ = try await self.s3.putObject(request, logger: self.logger)
+                try? await progress(1.0)
             }
-
-            let body: AWSHTTPBody = .init(
-                asyncSequence: FileByteBufferAsyncSequence(
-                    fileHandle,
-                    fileIO: fileIO,
-                    chunkSize: 64 * 1024,
-                    byteBufferAllocator: self.s3.config.byteBufferAllocator,
-                    eventLoop: eventLoop
-                ).reportProgress { totalBytes in
-                    try await progress(Double(totalBytes) / Double(fileSize))
-                },
-                length: fileRegion.readableBytes
-            )
-            let request = S3.PutObjectRequest(body: body, bucket: to.bucket, key: to.key, options: options)
-            _ = try await self.s3.putObject(request, logger: self.logger)
-            try? await progress(1.0)
         }
     }
 
@@ -190,7 +185,6 @@ public class S3FileTransferManager {
         progress: @escaping (Double) async throws -> Void = { _ in }
     ) async throws {
         self.logger.debug("Copy from: \(from) to \(to)")
-        let eventLoop = self.s3.eventLoopGroup.next()
 
         // check for existence of file
         do {
@@ -201,7 +195,7 @@ public class S3FileTransferManager {
             }
             throw error
         }
-        let filename = try await self.threadPool.runIfActive(eventLoop: eventLoop) { () -> String in
+        let filename = try await self.threadPool.runIfActive { () -> String in
             var to = to
             // if `to` is a folder append name of object to end of `to` string to place object in folder `to`.
             var isDirectory: ObjCBool = false
@@ -228,19 +222,17 @@ public class S3FileTransferManager {
                 }
             }
             return to
-        }.get()
-        let fileHandle = try await self.fileIO.openFile(path: filename, mode: .write, flags: .allowFileCreation(), eventLoop: eventLoop).get()
-        defer {
-            try? fileHandle.close()
         }
-        let request = S3.GetObjectRequest(bucket: from.bucket, key: from.key, options: options)
-        let response = try await self.s3.getObject(request, logger: self.logger)
-        var bytesDownloaded = 0
-        let fileSize = response.contentLength ?? 1
-        for try await buffer in response.body {
-            bytesDownloaded += buffer.readableBytes
-            try await self.fileIO.write(fileHandle: fileHandle, buffer: buffer, eventLoop: eventLoop).get()
-            try await progress(Double(bytesDownloaded) / Double(fileSize))
+        try await self.fileIO.withFileHandle(path: filename, mode: .write, flags: .allowFileCreation()) { fileHandle in
+            let request = S3.GetObjectRequest(bucket: from.bucket, key: from.key, options: options)
+            let response = try await self.s3.getObject(request, logger: self.logger)
+            var bytesDownloaded = 0
+            let fileSize = response.contentLength ?? 1
+            for try await buffer in response.body {
+                bytesDownloaded += buffer.readableBytes
+                try await self.fileIO.write(fileHandle: fileHandle, buffer: buffer)
+                try await progress(Double(bytesDownloaded) / Double(fileSize))
+            }
         }
     }
 
@@ -577,8 +569,7 @@ extension S3FileTransferManager {
 
     /// List files in local folder
     func listFiles(in folder: String) async throws -> [FileDescriptor] {
-        let eventLoop = self.s3.eventLoopGroup.next()
-        return try await self.threadPool.runIfActive(eventLoop: eventLoop) {
+        return try await self.threadPool.runIfActive {
             var files: [FileDescriptor] = []
             let path = URL(fileURLWithPath: folder)
             guard let fileEnumerator = FileManager.default.enumerator(
@@ -602,7 +593,7 @@ extension S3FileTransferManager {
                 files.append(fileDescriptor)
             }
             return files
-        }.get()
+        }
     }
 
     /// List files in S3 folder
@@ -825,10 +816,9 @@ extension S3FileTransferManager {
     /// delete a local file
     func delete(_ file: String) async throws {
         self.logger.debug("Deleting \(file)")
-        let eventLoop = self.s3.eventLoopGroup.next()
-        try await self.threadPool.runIfActive(eventLoop: eventLoop) {
+        try await self.threadPool.runIfActive {
             try FileManager.default.removeItem(atPath: file)
-        }.get()
+        }
     }
 
     /// delete files on S3.
