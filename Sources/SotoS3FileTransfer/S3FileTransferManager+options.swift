@@ -16,7 +16,7 @@ import Foundation
 import SotoS3
 
 extension S3FileTransferManager {
-    public struct PutOptions {
+    public struct PutOptions: Sendable {
         /// The canned ACL to apply to the object. For more information, see Canned ACL. This action is not supported by Amazon S3 on Outposts.
         public let acl: S3.ObjectCannedACL?
         ///  Can be used to specify caching behavior along the request/reply chain. For more information, see http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.9.
@@ -143,7 +143,7 @@ extension S3FileTransferManager {
 }
 
 extension S3.PutObjectRequest {
-    init(body: AWSPayload, bucket: String, key: String, options: S3FileTransferManager.PutOptions) {
+    init(body: AWSHTTPBody, bucket: String, key: String, options: S3FileTransferManager.PutOptions) {
         self.init(
             acl: options.acl,
             body: body,

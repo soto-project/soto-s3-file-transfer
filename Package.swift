@@ -1,4 +1,4 @@
-// swift-tools-version:5.7
+// swift-tools-version:5.8
 //===----------------------------------------------------------------------===//
 //
 // This source file is part of the Soto for AWS open source project
@@ -15,14 +15,18 @@
 
 import PackageDescription
 
+let swiftSettings: [SwiftSetting] = [
+    .enableExperimentalFeature("StrictConcurrency=complete"),
+]
+
 let package = Package(
     name: "soto-s3-file-transfer",
-    platforms: [.iOS(.v12), .tvOS(.v12), .watchOS(.v5)],
+    platforms: [.macOS(.v10_15), .iOS(.v13), .tvOS(.v13), .watchOS(.v6)],
     products: [
         .library(name: "SotoS3FileTransfer", targets: ["SotoS3FileTransfer"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/soto-project/soto.git", from: "6.8.0"),
+        .package(url: "https://github.com/soto-project/soto.git", from: "7.0.0-beta.1"),
         .package(url: "https://github.com/apple/swift-atomics.git", from: "1.0.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0")
     ],
@@ -31,7 +35,7 @@ let package = Package(
             .product(name: "SotoS3", package: "soto"),
             .product(name: "Atomics", package: "swift-atomics"),
             .product(name: "Logging", package: "swift-log"),
-        ]),
+        ], swiftSettings: swiftSettings),
         .testTarget(name: "SotoS3FileTransferTests", dependencies: ["SotoS3FileTransfer"]),
     ]
 )

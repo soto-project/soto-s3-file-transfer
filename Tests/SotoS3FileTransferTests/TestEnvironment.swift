@@ -19,6 +19,7 @@ import Darwin.C
 #endif
 import Logging
 import SotoCore
+import XCTest
 
 internal enum Environment {
     internal static subscript(_ name: String) -> String? {
@@ -40,20 +41,19 @@ enum TestEnvironment {
     static var credentialProvider: CredentialProviderFactory { return isUsingLocalstack ? .static(accessKeyId: "foo", secretAccessKey: "bar") : .default }
 
     /// current list of middleware
-    static var middlewares: [AWSServiceMiddleware] {
-        return (Environment["AWS_ENABLE_LOGGING"] == "true") ? [AWSLoggingMiddleware()] : []
+    /// current list of middleware
+    static var middlewares: AWSMiddlewareProtocol {
+        return (Environment["AWS_ENABLE_LOGGING"] == "true")
+            ? AWSLoggingMiddleware(logger: TestEnvironment.logger, logLevel: .info)
+            : AWSMiddleware { request, context, next in
+                try await next(request, context)
+            }
     }
 
     /// return endpoint
     static func getEndPoint(environment: String) -> String? {
         guard self.isUsingLocalstack == true else { return nil }
         return Environment[environment] ?? "http://localhost:4566"
-    }
-
-    /// get name to use for AWS resource
-    static func generateResourceName(_ function: String = #function) -> String {
-        let prefix = Environment["AWS_TEST_RESOURCE_PREFIX"] ?? ""
-        return "soto-" + (prefix + function).filter { $0.isLetter || $0.isNumber }.lowercased()
     }
 
     public static var logger: Logger = {
@@ -66,4 +66,36 @@ enum TestEnvironment {
         }
         return AWSClient.loggingDisabled
     }()
+}
+
+/// Run some test code for a specific asset
+func XCTTestAsset<T>(
+    create: () async throws -> T,
+    test: (T) async throws -> Void,
+    delete: (T) async throws -> Void
+) async throws {
+    let asset = try await create()
+    do {
+        try await test(asset)
+    } catch {
+        XCTFail("\(error)")
+    }
+    try await delete(asset)
+}
+
+/// Test for specific error being thrown when running some code
+func XCTAsyncExpectError<E: Error & Equatable>(
+    _ expectedError: E,
+    _ expression: () async throws -> Void,
+    _ message: @autoclosure () -> String = "",
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        _ = try await expression()
+        XCTFail("\(file):\(line) was expected to throw an error but it didn't")
+    } catch let error as E where error == expectedError {
+    } catch {
+        XCTFail("\(file):\(line) expected error \(expectedError) but got \(error)")
+    }
 }

@@ -16,16 +16,14 @@ import NIO
 import NIOConcurrencyHelpers
 
 extension S3FileTransferManager {
-    class FolderUploadProgress {
-        let lock: NIOLock
+    actor FolderUploadProgress {
         let totalSize: UInt64
         let sizes: [String: UInt64]
         var uploadedSize: UInt64
         var currentUploadingSizes: [String: UInt64]
-        var progressFunc: (Double) throws -> Void = { _ in }
+        var progressFunc: @Sendable (Double) async throws -> Void = { _ in }
 
-        init(_ s3Files: [S3FileDescriptor], progress: @escaping (Double) throws -> Void = { _ in }) {
-            self.lock = .init()
+        init(_ s3Files: [S3FileDescriptor], progress: @escaping @Sendable (Double) async throws -> Void = { _ in }) {
             self.sizes = .init(s3Files.map { (key: $0.file.key, value: UInt64($0.size)) }) { first, _ in first }
             self.totalSize = self.sizes.values.reduce(UInt64(0), +)
             self.uploadedSize = 0
@@ -33,8 +31,7 @@ extension S3FileTransferManager {
             self.progressFunc = progress
         }
 
-        init(_ files: [FileDescriptor], progress: @escaping (Double) throws -> Void = { _ in }) {
-            self.lock = .init()
+        init(_ files: [FileDescriptor], progress: @escaping @Sendable (Double) async throws -> Void = { _ in }) {
             self.sizes = .init(files.map { (key: $0.name, value: UInt64($0.size)) }) { first, _ in first }
             self.totalSize = self.sizes.values.reduce(UInt64(0), +)
             self.uploadedSize = 0
@@ -42,18 +39,14 @@ extension S3FileTransferManager {
             self.progressFunc = progress
         }
 
-        func updateProgress(_ file: String, progress: Double) throws {
-            try self.lock.withLock {
-                currentUploadingSizes[file] = sizes[file].map { UInt64(Double($0) * progress) } ?? 0
-                try progressFunc(self.progress)
-            }
+        func updateProgress(_ file: String, progress: Double) async throws {
+            self.currentUploadingSizes[file] = self.sizes[file].map { UInt64(Double($0) * progress) } ?? 0
+            try await self.progressFunc(self.progress)
         }
 
         func setFileUploaded(_ file: String) {
-            self.lock.withLock {
-                currentUploadingSizes[file] = nil
-                uploadedSize += sizes[file] ?? 0
-            }
+            self.currentUploadingSizes[file] = nil
+            self.uploadedSize += self.sizes[file] ?? 0
         }
 
         var finished: Bool { self.totalSize == self.uploadedSize && self.currentUploadingSizes.count == 0 }
