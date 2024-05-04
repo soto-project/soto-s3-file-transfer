@@ -561,10 +561,10 @@ extension S3FileTransferManager {
         let size: Int
     }
 
-    struct S3FileDescriptor: Equatable {
-        let file: S3File
-        let modificationDate: Date
-        let size: Int
+    public struct S3FileDescriptor: Equatable {
+        public let file: S3File
+        public let modificationDate: Date
+        public let size: Int
     }
 
     /// List files in local folder
@@ -597,7 +597,7 @@ extension S3FileTransferManager {
     }
 
     /// List files in S3 folder
-    func listFiles(in folder: S3Folder) async throws -> [S3FileDescriptor] {
+    public func listFiles(in folder: S3Folder) async throws -> [S3FileDescriptor] {
         let request = S3.ListObjectsV2Request(bucket: folder.bucket, prefix: folder.key)
         var files: [S3FileDescriptor] = []
         for try await objects in self.s3.listObjectsV2Paginator(request, logger: self.logger) {
