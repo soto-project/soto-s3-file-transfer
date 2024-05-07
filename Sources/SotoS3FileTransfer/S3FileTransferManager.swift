@@ -561,10 +561,14 @@ extension S3FileTransferManager {
         let size: Int
     }
 
-    struct S3FileDescriptor: Equatable {
-        let file: S3File
-        let modificationDate: Date
-        let size: Int
+    /// A descriptor representing a file stored in an S3 bucket.
+    public struct S3FileDescriptor: Equatable {
+        /// The S3 file represented by this descriptor.
+        public let file: S3File
+        /// The date and time when the file was last modified.
+        public let modificationDate: Date
+        /// The size of the file in bytes.
+        public let size: Int
     }
 
     /// List files in local folder
@@ -596,8 +600,13 @@ extension S3FileTransferManager {
         }
     }
 
-    /// List files in S3 folder
-    func listFiles(in folder: S3Folder) async throws -> [S3FileDescriptor] {
+    /// Lists all files in the specified S3 folder.
+    ///
+    /// - Parameters:
+    ///   - in: Path to remote S3 folder to list files from.
+    /// - Returns: An array of `S3FileDescriptor` objects representing the files in the specified folder. If the directory contains no files, this method returns an empty array.
+    /// - Throws: An error if the folder cannot be accessed or if there is any other issue listing the files.
+    public func listFiles(in folder: S3Folder) async throws -> [S3FileDescriptor] {
         let request = S3.ListObjectsV2Request(bucket: folder.bucket, prefix: folder.key)
         var files: [S3FileDescriptor] = []
         for try await objects in self.s3.listObjectsV2Paginator(request, logger: self.logger) {
