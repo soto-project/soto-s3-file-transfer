@@ -95,7 +95,7 @@ public final class S3FileTransferManager: Sendable {
     /// Logger
     public let logger: Logger
     /// Have we shutdown the Manager
-    internal let isShutdown = ManagedAtomic(false) // <Bool>.makeAtomic(value: false)
+    let isShutdown = ManagedAtomic(false) // <Bool>.makeAtomic(value: false)
 
     /// Initialize S3 Transfer manager.
     /// - Parameters:
@@ -555,14 +555,14 @@ public final class S3FileTransferManager: Sendable {
 }
 
 extension S3FileTransferManager {
-    struct FileDescriptor: Equatable {
+    struct FileDescriptor: Equatable, Sendable {
         let name: String
         let modificationDate: Date
         let size: Int
     }
 
     /// A descriptor representing a file stored in an S3 bucket.
-    public struct S3FileDescriptor: Equatable {
+    public struct S3FileDescriptor: Equatable, Sendable {
         /// The S3 file represented by this descriptor.
         public let file: S3File
         /// The date and time when the file was last modified.
