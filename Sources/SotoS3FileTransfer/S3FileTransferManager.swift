@@ -223,7 +223,9 @@ public final class S3FileTransferManager: Sendable {
             }
             return to
         }
-        try await self.fileIO.withFileHandle(path: filename, mode: .write, flags: .allowFileCreation()) { fileHandle in
+        // if the file exists truncate prior writting to it
+        let fileHandleFlags = NIOFileHandle.Flags.posix(flags: O_CREAT | O_TRUNC, mode: NIOFileHandle.Flags.defaultPermissions)
+        try await self.fileIO.withFileHandle(path: filename, mode: .write, flags: fileHandleFlags) { fileHandle in
             let request = S3.GetObjectRequest(bucket: from.bucket, key: from.key, options: options)
             let response = try await self.s3.getObject(request, logger: self.logger)
             var bytesDownloaded = 0
