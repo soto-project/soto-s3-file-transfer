@@ -118,7 +118,6 @@ public final class S3FileTransferManager: Sendable {
     ///   - from: local filename
     ///   - to: S3 file
     ///   - progress: progress function, updated with value from 0 to 1 based on how much we have uploaded
-    /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func copy(
         from: String,
         to: S3File,
@@ -174,7 +173,6 @@ public final class S3FileTransferManager: Sendable {
     ///   - from: S3 file
     ///   - to: local filename
     ///   - progress: progress function, updated with value from 0 to 1 based on how much we have uploaded
-    /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func copy(
         from: S3File,
         to: String,
@@ -241,7 +239,6 @@ public final class S3FileTransferManager: Sendable {
     ///   - to: destination S3 file
     ///   - fileSize: Size of file to copy. If you don't provide this then function will call `headObject` to ascertain this
     ///   - options: Options while copying
-    /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func copy(
         from: S3File,
         to: S3File,
@@ -277,7 +274,6 @@ public final class S3FileTransferManager: Sendable {
     /// - Parameters:
     ///   - from: local folder
     ///   - to: Path to S3 folder
-    /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func copy(
         from folder: String,
         to s3Folder: S3Folder,
@@ -294,7 +290,6 @@ public final class S3FileTransferManager: Sendable {
     /// - Parameters:
     ///   - from: Path to S3 folder
     ///   - to: Local folder
-    /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func copy(
         from s3Folder: S3Folder,
         to folder: String,
@@ -311,7 +306,6 @@ public final class S3FileTransferManager: Sendable {
     /// - Parameters:
     ///   - from: Path to source S3 folder
     ///   - to: Path to destination S3 folder
-    /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func copy(
         from srcFolder: S3Folder,
         to destFolder: S3Folder,
@@ -332,7 +326,6 @@ public final class S3FileTransferManager: Sendable {
     ///   - from: Local folder
     ///   - to: Path to destination S3 folder
     ///   - delete: Should we delete files on S3 that don't exists locally
-    /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func sync(
         from folder: String,
         to s3Folder: S3Folder,
@@ -376,7 +369,6 @@ public final class S3FileTransferManager: Sendable {
     ///   - from: Path to source S3 folder
     ///   - to: Local folder
     ///   - delete: Should we delete files locally that don't exists in S3
-    /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func sync(
         from s3Folder: S3Folder,
         to folder: String,
@@ -429,7 +421,6 @@ public final class S3FileTransferManager: Sendable {
     ///   - from: Path to source S3 folder
     ///   - to: Local folder
     ///   - delete: Should we delete files locally that don't exists in S3
-    /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func sync(
         from srcFolder: S3Folder,
         to destFolder: S3Folder,
@@ -477,7 +468,6 @@ public final class S3FileTransferManager: Sendable {
     ///   - download: Details of remaining downloads to perform
     ///   - options: Download options
     ///   - progress: Progress function
-    /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func resume(
         download: UploadOperation,
         options: PutOptions = .init(),
@@ -500,7 +490,6 @@ public final class S3FileTransferManager: Sendable {
     ///   - download: Details of remaining downloads to perform
     ///   - options: Download options
     ///   - progress: Progress function
-    /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func resume(
         download: DownloadOperation,
         options: GetOptions = .init(),
@@ -523,7 +512,6 @@ public final class S3FileTransferManager: Sendable {
     ///   - download: Details of remaining downloads to perform
     ///   - options: Download options
     ///   - progress: Progress function
-    /// - Returns: EventLoopFuture fulfilled when operation is complete
     public func resume(
         download: CopyOperation,
         options: CopyOptions = .init(),
