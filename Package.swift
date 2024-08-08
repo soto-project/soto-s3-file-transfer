@@ -31,11 +31,20 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0")
     ],
     targets: [
-        .target(name: "SotoS3FileTransfer", dependencies: [
-            .product(name: "SotoS3", package: "soto"),
-            .product(name: "Atomics", package: "swift-atomics"),
-            .product(name: "Logging", package: "swift-log"),
-        ], swiftSettings: swiftSettings),
-        .testTarget(name: "SotoS3FileTransferTests", dependencies: ["SotoS3FileTransfer"]),
+        .target(
+            name: "SotoS3FileTransfer",
+            dependencies: [
+                .product(name: "SotoS3", package: "soto"),
+                .product(name: "Logging", package: "swift-log"),
+            ],
+            swiftSettings: swiftSettings
+        ),
+        .testTarget(
+            name: "SotoS3FileTransferTests",
+            dependencies: [
+                "SotoS3FileTransfer",
+                .product(name: "Atomics", package: "swift-atomics"),
+            ]
+        ),
     ]
 )
