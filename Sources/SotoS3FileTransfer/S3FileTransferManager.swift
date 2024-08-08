@@ -12,7 +12,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-import Atomics
 import Foundation
 import Logging
 import NIOConcurrencyHelpers
@@ -94,8 +93,6 @@ public final class S3FileTransferManager: Sendable {
     public let configuration: Configuration
     /// Logger
     public let logger: Logger
-    /// Have we shutdown the Manager
-    let isShutdown = ManagedAtomic(false) // <Bool>.makeAtomic(value: false)
 
     /// Initialize S3 Transfer manager.
     /// - Parameters:
