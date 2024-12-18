@@ -1,37 +1,37 @@
 name: CI
 
-on: 
+on:
   push:
-    branches: 
-    - main
+    branches:
+      - main
   pull_request:
 
 jobs:
   macos:
-    runs-on: macOS-13
+    runs-on: macOS-14
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    - name: SPM build
-      run: swift build
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: SPM build
+        run: swift build
 
   linux:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         image:
-          - swift:5.8
           - swift:5.9
           - swift:5.10
+          - swift:6.0
     services:
       localstack:
         image: localstack/localstack
     container:
       image: ${{ matrix.image }}
       env:
-        LOCALSTACK_ENDPOINT : "http://localstack:4566"
+        LOCALSTACK_ENDPOINT: "http://localstack:4566"
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-    - name: Test
-      run: swift test
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Test
+        run: swift test
