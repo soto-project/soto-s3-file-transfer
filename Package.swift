@@ -16,19 +16,19 @@
 import PackageDescription
 
 let swiftSettings: [SwiftSetting] = [
-    .enableExperimentalFeature("StrictConcurrency=complete"),
+    .enableExperimentalFeature("StrictConcurrency=complete")
 ]
 
 let package = Package(
     name: "soto-s3-file-transfer",
     platforms: [.macOS(.v10_15), .iOS(.v13), .tvOS(.v13), .watchOS(.v6)],
     products: [
-        .library(name: "SotoS3FileTransfer", targets: ["SotoS3FileTransfer"]),
+        .library(name: "SotoS3FileTransfer", targets: ["SotoS3FileTransfer"])
     ],
     dependencies: [
         .package(url: "https://github.com/soto-project/soto.git", from: "7.3.0"),
         .package(url: "https://github.com/apple/swift-atomics.git", from: "1.0.0"),
-        .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0")
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
     ],
     targets: [
         .target(
@@ -46,5 +46,6 @@ let package = Package(
                 .product(name: "Atomics", package: "swift-atomics"),
             ]
         ),
-    ]
+    ],
+    swiftLanguageVersions: [.v5, .version("6")]
 )
