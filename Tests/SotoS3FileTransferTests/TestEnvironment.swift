@@ -12,14 +12,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if os(Linux)
-import Glibc
-#else
-import Darwin.C
-#endif
 import Logging
 import SotoCore
 import XCTest
+
+#if os(Linux)
+    import Glibc
+#else
+    import Darwin.C
+#endif
 
 internal enum Environment {
     internal static subscript(_ name: String) -> String? {
@@ -34,11 +35,13 @@ internal enum Environment {
 enum TestEnvironment {
     /// are we using Localstack to test. Also return use localstack if we are running a github action and don't have an access key if
     static var isUsingLocalstack: Bool {
-        return Environment["AWS_DISABLE_LOCALSTACK"] != "true" ||
-            (Environment["GITHUB_ACTIONS"] == "true" && Environment["AWS_ACCESS_KEY_ID"] == "")
+        return Environment["AWS_DISABLE_LOCALSTACK"] != "true"
+            || (Environment["GITHUB_ACTIONS"] == "true" && Environment["AWS_ACCESS_KEY_ID"] == "")
     }
 
-    static var credentialProvider: CredentialProviderFactory { return isUsingLocalstack ? .static(accessKeyId: "foo", secretAccessKey: "bar") : .default }
+    static var credentialProvider: CredentialProviderFactory {
+        return isUsingLocalstack ? .static(accessKeyId: "foo", secretAccessKey: "bar") : .default
+    }
 
     /// current list of middleware
     /// current list of middleware
@@ -56,7 +59,7 @@ enum TestEnvironment {
         return Environment[environment] ?? "http://localhost:4566"
     }
 
-    public static var logger: Logger = {
+    nonisolated(unsafe) public static var logger: Logger = {
         if let loggingLevel = Environment["AWS_LOG_LEVEL"] {
             if let logLevel = Logger.Level(rawValue: loggingLevel.lowercased()) {
                 var logger = Logger(label: "soto")
