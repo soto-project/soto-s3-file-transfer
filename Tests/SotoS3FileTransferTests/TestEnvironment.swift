@@ -59,7 +59,7 @@ enum TestEnvironment {
         return Environment[environment] ?? "http://localhost:4566"
     }
 
-    nonisolated(unsafe) public static var logger: Logger = {
+    static let logger: Logger = {
         if let loggingLevel = Environment["AWS_LOG_LEVEL"] {
             if let logLevel = Logger.Level(rawValue: loggingLevel.lowercased()) {
                 var logger = Logger(label: "soto")
