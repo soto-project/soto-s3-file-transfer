@@ -567,7 +567,7 @@ public final class S3FileTransferManager: Sendable {
         progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
     ) async throws {
         try await self.copy(
-            download.transfers,
+            copy.transfers,
             options: options,
             progress: progress
         )
