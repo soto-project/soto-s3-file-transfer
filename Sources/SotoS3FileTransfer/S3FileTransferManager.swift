@@ -39,7 +39,10 @@ public final class S3FileTransferManager: Sendable {
             maxConcurrentTasks: Int = 4
         ) {
             precondition(multipartThreshold >= 5 * 1024 * 1024, "Multipart upload threshold is required to be greater than 5MB")
-            precondition(multipartThreshold >= multipartPartSize, "Multipart upload threshold is required to be greater than or equal to the multipart part size")
+            precondition(
+                multipartThreshold >= multipartPartSize,
+                "Multipart upload threshold is required to be greater than or equal to the multipart part size"
+            )
             self.cancelOnError = cancelOnError
             self.multipartThreshold = multipartThreshold
             self.multipartPartSize = multipartPartSize
@@ -468,13 +471,36 @@ public final class S3FileTransferManager: Sendable {
     ///   - download: Details of remaining downloads to perform
     ///   - options: Download options
     ///   - progress: Progress function
+    @available(*, deprecated, renamed: "resume(upload:options:progress:)")
     public func resume(
         download: UploadOperation,
         options: PutOptions = .init(),
         progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
     ) async throws {
-        return try await self.copy(
+        try await self.copy(
             download.transfers,
+            options: options,
+            progress: progress
+        )
+    }
+
+    /// Resume upload to S3 that previously failed
+    ///
+    /// When a copy or sync to S3 operation fails it will throw a
+    /// S3TransferManager.Error.uploadFailed error. This contains a `UploadOperation`.
+    /// struct. You can resume the upload by passing the struct to the this function.
+    ///
+    /// - Parameters:
+    ///   - download: Details of remaining downloads to perform
+    ///   - options: Download options
+    ///   - progress: Progress function
+    public func resume(
+        upload: UploadOperation,
+        options: PutOptions = .init(),
+        progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
+    ) async throws {
+        try await self.copy(
+            upload.transfers,
             options: options,
             progress: progress
         )
@@ -495,7 +521,30 @@ public final class S3FileTransferManager: Sendable {
         options: GetOptions = .init(),
         progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
     ) async throws {
-        return try await self.copy(
+        try await self.copy(
+            download.transfers,
+            options: options,
+            progress: progress
+        )
+    }
+
+    /// Resume copy from S3 to S3 that previously failed
+    ///
+    /// When a copy or sync to S3 operation fails it will throw a
+    /// S3TransferManager.Error.copyFailed error. This contains a `CopyOperation`.
+    /// struct. You can resume the copy by passing the struct to the this function.
+    ///
+    /// - Parameters:
+    ///   - download: Details of remaining downloads to perform
+    ///   - options: Download options
+    ///   - progress: Progress function
+    @available(*, deprecated, renamed: "resume(copy:options:progress:)")
+    public func resume(
+        download: CopyOperation,
+        options: CopyOptions = .init(),
+        progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
+    ) async throws {
+        try await self.copy(
             download.transfers,
             options: options,
             progress: progress
@@ -513,11 +562,11 @@ public final class S3FileTransferManager: Sendable {
     ///   - options: Download options
     ///   - progress: Progress function
     public func resume(
-        download: CopyOperation,
+        copy: CopyOperation,
         options: CopyOptions = .init(),
         progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
     ) async throws {
-        return try await self.copy(
+        try await self.copy(
             download.transfers,
             options: options,
             progress: progress
@@ -560,14 +609,16 @@ extension S3FileTransferManager {
 
     /// List files in local folder
     func listFiles(in folder: String) async throws -> [FileDescriptor] {
-        return try await self.threadPool.runIfActive {
+        try await self.threadPool.runIfActive {
             var files: [FileDescriptor] = []
             let path = URL(fileURLWithPath: folder)
-            guard let fileEnumerator = FileManager.default.enumerator(
-                at: path,
-                includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey, .fileSizeKey],
-                options: .skipsHiddenFiles
-            ) else {
+            guard
+                let fileEnumerator = FileManager.default.enumerator(
+                    at: path,
+                    includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey, .fileSizeKey],
+                    options: .skipsHiddenFiles
+                )
+            else {
                 throw Error.failedToEnumerateFolder(folder)
             }
             while let file = fileEnumerator.nextObject() as? URL {
@@ -597,16 +648,18 @@ extension S3FileTransferManager {
         let request = S3.ListObjectsV2Request(bucket: folder.bucket, prefix: folder.key)
         var files: [S3FileDescriptor] = []
         for try await objects in self.s3.listObjectsV2Paginator(request, logger: self.logger) {
-            let newFiles: [S3FileDescriptor] = objects.contents?.compactMap {
-                guard let key = $0.key,
-                      let lastModified = $0.lastModified,
-                      let fileSize = $0.size else { return nil }
-                return S3FileDescriptor(
-                    file: S3File(bucket: folder.bucket, key: key),
-                    modificationDate: lastModified,
-                    size: Int(fileSize)
-                )
-            } ?? []
+            let newFiles: [S3FileDescriptor] =
+                objects.contents?.compactMap {
+                    guard let key = $0.key,
+                        let lastModified = $0.lastModified,
+                        let fileSize = $0.size
+                    else { return nil }
+                    return S3FileDescriptor(
+                        file: S3File(bucket: folder.bucket, key: key),
+                        modificationDate: lastModified,
+                        size: Int(fileSize)
+                    )
+                } ?? []
             files += newFiles
         }
         return files
@@ -622,7 +675,7 @@ extension S3FileTransferManager {
             return try result.compactMap {
                 let prevFilename = $0.file.key
                 if filename.hasPrefix(prevFilename),
-                   prevFilename.last == "/" || filename.dropFirst(prevFilename.count).first == "/"
+                    prevFilename.last == "/" || filename.dropFirst(prevFilename.count).first == "/"
                 {
                     if ignoreClashes {
                         return nil
@@ -854,7 +907,7 @@ extension S3FileTransferManager {
     /// the S3 folder to another S3 folder. Function assumes the S3 files have the source path
     /// prefixed
     static func targetFiles(files: [S3FileDescriptor], from srcFolder: S3Folder, to destFolder: S3Folder) -> [(from: S3FileDescriptor, to: S3File)] {
-        return files.map { file in
+        files.map { file in
             let pathRelative = file.file.key.removingPrefix(srcFolder.key)
             return (from: file, to: .init(bucket: destFolder.bucket, key: destFolder.key + pathRelative))
         }
