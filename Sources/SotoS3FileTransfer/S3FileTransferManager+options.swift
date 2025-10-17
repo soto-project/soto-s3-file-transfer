@@ -15,6 +15,16 @@
 import Foundation
 import SotoS3
 
+extension Date {
+    func httpDateString() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss z"
+        formatter.timeZone = TimeZone(abbreviation: "GMT")
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter.string(from: self)
+    }
+}
+
 extension S3FileTransferManager {
     public struct PutOptions: Sendable {
         /// The canned ACL to apply to the object. For more information, see Canned ACL. This action is not supported by Amazon S3 on Outposts.
@@ -154,7 +164,7 @@ extension S3.PutObjectRequest {
             contentLanguage: options.contentLanguage,
             contentType: options.contentType,
             expectedBucketOwner: options.expectedBucketOwner,
-            expires: options.expires,
+            expires: options.expires?.httpDateString(),
             grantFullControl: options.grantFullControl,
             grantRead: options.grantRead,
             grantReadACP: options.grantReadACP,
@@ -189,7 +199,7 @@ extension S3.CreateMultipartUploadRequest {
             contentLanguage: options.contentLanguage,
             contentType: options.contentType,
             expectedBucketOwner: options.expectedBucketOwner,
-            expires: options.expires,
+            expires: options.expires?.httpDateString(),
             grantFullControl: options.grantFullControl,
             grantRead: options.grantRead,
             grantReadACP: options.grantReadACP,
@@ -225,7 +235,7 @@ extension S3.CopyObjectRequest {
             contentType: options.contentType,
             copySource: copySource,
             expectedBucketOwner: options.expectedBucketOwner,
-            expires: options.expires,
+            expires: options.expires?.httpDateString(),
             grantFullControl: options.grantFullControl,
             grantRead: options.grantRead,
             grantReadACP: options.grantReadACP,
