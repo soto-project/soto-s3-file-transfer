@@ -15,6 +15,16 @@
 import Foundation
 import SotoS3
 
+extension Date {
+    fileprivate func _httpDateString() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss z"
+        formatter.timeZone = TimeZone(abbreviation: "GMT")
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter.string(from: self)
+    }
+}
+
 extension S3FileTransferManager {
     public struct PutOptions: Sendable {
         /// The canned ACL to apply to the object. For more information, see Canned ACL. This action is not supported by Amazon S3 on Outposts.
@@ -69,7 +79,34 @@ extension S3FileTransferManager {
         /// If the bucket is configured as a website, redirects requests for this object to another object in the same bucket or to an external URL. Amazon S3 stores the value of this header in the object metadata. For information about object metadata, see Object Key and Metadata. In the following example, the request header sets the redirect to an object (anotherPage.html) in the same bucket:  x-amz-website-redirect-location: /anotherPage.html  In the following example, the request header sets the object redirect to another website:  x-amz-website-redirect-location: http://www.example.com/  For more information about website hosting in Amazon S3, see Hosting Websites on Amazon S3 and How to Configure Website Page Redirects.
         public let websiteRedirectLocation: String?
 
-        public init(acl: S3.ObjectCannedACL? = nil, cacheControl: String? = nil, contentDisposition: String? = nil, contentEncoding: String? = nil, contentLanguage: String? = nil, contentType: String? = nil, expectedBucketOwner: String? = nil, expires: Date? = nil, grantFullControl: String? = nil, grantRead: String? = nil, grantReadACP: String? = nil, grantWriteACP: String? = nil, metadata: [String: String]? = nil, objectLockLegalHoldStatus: S3.ObjectLockLegalHoldStatus? = nil, objectLockMode: S3.ObjectLockMode? = nil, objectLockRetainUntilDate: Date? = nil, requestPayer: S3.RequestPayer? = nil, serverSideEncryption: S3.ServerSideEncryption? = nil, sseCustomerAlgorithm: String? = nil, sseCustomerKey: String? = nil, sseCustomerKeyMD5: String? = nil, ssekmsEncryptionContext: String? = nil, ssekmsKeyId: String? = nil, storageClass: S3.StorageClass? = nil, tagging: String? = nil, websiteRedirectLocation: String? = nil) {
+        public init(
+            acl: S3.ObjectCannedACL? = nil,
+            cacheControl: String? = nil,
+            contentDisposition: String? = nil,
+            contentEncoding: String? = nil,
+            contentLanguage: String? = nil,
+            contentType: String? = nil,
+            expectedBucketOwner: String? = nil,
+            expires: Date? = nil,
+            grantFullControl: String? = nil,
+            grantRead: String? = nil,
+            grantReadACP: String? = nil,
+            grantWriteACP: String? = nil,
+            metadata: [String: String]? = nil,
+            objectLockLegalHoldStatus: S3.ObjectLockLegalHoldStatus? = nil,
+            objectLockMode: S3.ObjectLockMode? = nil,
+            objectLockRetainUntilDate: Date? = nil,
+            requestPayer: S3.RequestPayer? = nil,
+            serverSideEncryption: S3.ServerSideEncryption? = nil,
+            sseCustomerAlgorithm: String? = nil,
+            sseCustomerKey: String? = nil,
+            sseCustomerKeyMD5: String? = nil,
+            ssekmsEncryptionContext: String? = nil,
+            ssekmsKeyId: String? = nil,
+            storageClass: S3.StorageClass? = nil,
+            tagging: String? = nil,
+            websiteRedirectLocation: String? = nil
+        ) {
             self.acl = acl
             self.cacheControl = cacheControl
             self.contentDisposition = contentDisposition
@@ -123,7 +160,19 @@ extension S3FileTransferManager {
         /// Ignore file folder clashes when downloading folders. When set to true the file is not downloaded
         public let ignoreFileFolderClashes: Bool
 
-        public init(expectedBucketOwner: String? = nil, ifMatch: String? = nil, ifModifiedSince: Date? = nil, ifNoneMatch: String? = nil, ifUnmodifiedSince: Date? = nil, requestPayer: S3.RequestPayer? = nil, sseCustomerAlgorithm: String? = nil, sseCustomerKey: String? = nil, sseCustomerKeyMD5: String? = nil, versionId: String? = nil, ignoreFileFolderClashes: Bool = false) {
+        public init(
+            expectedBucketOwner: String? = nil,
+            ifMatch: String? = nil,
+            ifModifiedSince: Date? = nil,
+            ifNoneMatch: String? = nil,
+            ifUnmodifiedSince: Date? = nil,
+            requestPayer: S3.RequestPayer? = nil,
+            sseCustomerAlgorithm: String? = nil,
+            sseCustomerKey: String? = nil,
+            sseCustomerKeyMD5: String? = nil,
+            versionId: String? = nil,
+            ignoreFileFolderClashes: Bool = false
+        ) {
             self.expectedBucketOwner = expectedBucketOwner
             self.ifMatch = ifMatch
             self.ifModifiedSince = ifModifiedSince
@@ -154,7 +203,7 @@ extension S3.PutObjectRequest {
             contentLanguage: options.contentLanguage,
             contentType: options.contentType,
             expectedBucketOwner: options.expectedBucketOwner,
-            expires: options.expires,
+            expires: options.expires?._httpDateString(),
             grantFullControl: options.grantFullControl,
             grantRead: options.grantRead,
             grantReadACP: options.grantReadACP,
@@ -189,7 +238,7 @@ extension S3.CreateMultipartUploadRequest {
             contentLanguage: options.contentLanguage,
             contentType: options.contentType,
             expectedBucketOwner: options.expectedBucketOwner,
-            expires: options.expires,
+            expires: options.expires?._httpDateString(),
             grantFullControl: options.grantFullControl,
             grantRead: options.grantRead,
             grantReadACP: options.grantReadACP,
@@ -225,7 +274,7 @@ extension S3.CopyObjectRequest {
             contentType: options.contentType,
             copySource: copySource,
             expectedBucketOwner: options.expectedBucketOwner,
-            expires: options.expires,
+            expires: options.expires?._httpDateString(),
             grantFullControl: options.grantFullControl,
             grantRead: options.grantRead,
             grantReadACP: options.grantReadACP,

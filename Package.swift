@@ -26,7 +26,7 @@ let package = Package(
         .library(name: "SotoS3FileTransfer", targets: ["SotoS3FileTransfer"])
     ],
     dependencies: [
-        .package(url: "https://github.com/soto-project/soto.git", from: "7.3.0"),
+        .package(url: "https://github.com/soto-project/soto.git", from: "7.10.0"),
         .package(url: "https://github.com/apple/swift-atomics.git", from: "1.0.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
     ],
