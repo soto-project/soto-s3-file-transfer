@@ -11,7 +11,7 @@ jobs:
     runs-on: macOS-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: SPM build
         run: swift build
 
@@ -20,18 +20,20 @@ jobs:
     strategy:
       matrix:
         image:
-          - swift:6.0
           - swift:6.1
           - swift:6.2
+          - swift:6.3
     services:
       localstack:
         image: localstack/localstack
+        env:
+          LOCALSTACK_AUTH_TOKEN: ${{ secrets.LOCALSTACK_AUTH_TOKEN }}
     container:
       image: ${{ matrix.image }}
       env:
         LOCALSTACK_ENDPOINT: "http://localstack:4566"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Test
         run: swift test
