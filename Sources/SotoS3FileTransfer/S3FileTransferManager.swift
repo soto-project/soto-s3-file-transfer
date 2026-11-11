@@ -188,7 +188,7 @@ public final class S3FileTransferManager: Sendable {
         do {
             _ = try await self.s3.headObject(.init(bucket: from.bucket, key: from.key), logger: self.logger)
         } catch {
-            if let error = error as? S3ErrorType, error == .notFound {
+            if let error = error as? S3ErrorType, case .notFound = error.error {
                 throw Error.fileDoesNotExist(String(describing: from))
             }
             throw error
@@ -266,7 +266,7 @@ public final class S3FileTransferManager: Sendable {
                 _ = try await self.s3.copyObject(request, logger: self.logger)
             }
         } catch {
-            if let error = error as? S3ErrorType, error == .notFound {
+            if let error = error as? S3ErrorType, case .notFound = error.error {
                 throw Error.fileDoesNotExist(String(describing: from))
             }
             throw error
