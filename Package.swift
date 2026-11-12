@@ -33,6 +33,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/soto-project/soto.git", branch: "8.x.x"),
         .package(url: "https://github.com/apple/swift-atomics.git", from: "1.0.0"),
+        .package(url: "https://github.com/apple/swift-nio.git", from: "2.101.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.4.0"),
     ],
     targets: [
@@ -40,6 +41,7 @@ let package = Package(
             name: "SotoS3FileTransfer",
             dependencies: [
                 .product(name: "SotoS3", package: "soto"),
+                .product(name: "_NIOFileSystem", package: "swift-nio"),
                 .product(name: "Logging", package: "swift-log"),
             ],
             swiftSettings: swiftSettings
