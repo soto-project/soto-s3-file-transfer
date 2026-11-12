@@ -18,6 +18,7 @@ import NIOConcurrencyHelpers
 import NIOCore
 import NIOPosix
 import SotoS3
+import _NIOFileSystem
 
 /// S3 Transfer manager. Transfers files/folders back and forth between S3 and your local file system
 public final class S3FileTransferManager: Sendable {
@@ -92,7 +93,7 @@ public final class S3FileTransferManager: Sendable {
     /// Thread pool used by transfer manager
     public let threadPool: NIOThreadPool
     /// File IO manager
-    public let fileIO: NonBlockingFileIO
+    public let fileSystem: FileSystem
     /// Configuration
     public let configuration: Configuration
     /// Logger
@@ -112,7 +113,7 @@ public final class S3FileTransferManager: Sendable {
     ) {
         self.s3 = s3
         self.threadPool = threadPool
-        self.fileIO = NonBlockingFileIO(threadPool: self.threadPool)
+        self.fileSystem = FileSystem(threadPool: self.threadPool)
         self.configuration = configuration
         self.logger = logger
     }
@@ -129,15 +130,10 @@ public final class S3FileTransferManager: Sendable {
         progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
     ) async throws {
         self.logger.debug("Copy from: \(from) to \(to)")
-        let fileSize: Int
-        do {
-            fileSize = try await self.threadPool.runIfActive {
-                let attributes = try FileManager.default.attributesOfItem(atPath: from)
-                return attributes[.size] as? Int ?? 0
-            }
-        } catch {
-            throw Error.fileDoesNotExist(String(describing: from))
+        guard let info = try await self.fileSystem.info(forFileAt: .init(from)) else {
+            throw Error.fileDoesNotExist(from)
         }
+        let fileSize = Int(info.size)
         // if file size is greater than multipart threshold then use multipart upload for uploading the file
         if fileSize > self.configuration.multipartThreshold {
             let request = S3.CreateMultipartUploadRequest(bucket: to.bucket, key: to.key, options: options)
@@ -152,20 +148,14 @@ public final class S3FileTransferManager: Sendable {
             )
             try? await progress(1.0)
         } else {
-            let fileIO = NonBlockingFileIO(threadPool: self.threadPool)
-            try await fileIO.withFileRegion(path: from) { region in
-                let body: AWSHTTPBody = .init(
-                    asyncSequence: FileByteBufferAsyncSequence(
-                        region.fileHandle,
-                        fileIO: fileIO,
-                        chunkSize: 64 * 1024,
-                        byteBufferAllocator: self.s3.config.byteBufferAllocator
-                    ).reportProgress { totalBytes in
-                        try await progress(Double(totalBytes) / Double(fileSize))
-                    },
-                    length: region.readableBytes
+            let fileSystem = FileSystem(threadPool: self.threadPool)
+            try await fileSystem.withFileHandle(forReadingAt: .init(from)) { handle in
+                let request = try await S3.PutObjectRequest(
+                    body: .init(asyncSequence: handle.readChunks(chunkLength: .kibibytes(64)), length: Int(handle.info().size)),
+                    bucket: to.bucket,
+                    key: to.key,
+                    options: options
                 )
-                let request = S3.PutObjectRequest(body: body, bucket: to.bucket, key: to.key, options: options)
                 _ = try await self.s3.putObject(request, logger: self.logger)
                 try? await progress(1.0)
             }
@@ -223,15 +213,15 @@ public final class S3FileTransferManager: Sendable {
             return to
         }
         // if the file exists truncate prior writting to it
-        let fileHandleFlags = NIOFileHandle.Flags.posix(flags: O_CREAT | O_TRUNC, mode: NIOFileHandle.Flags.defaultPermissions)
-        try await self.fileIO.withFileHandle(path: filename, mode: .write, flags: fileHandleFlags) { fileHandle in
+        let fileSystem = FileSystem(threadPool: self.threadPool)
+        try await fileSystem.withFileHandle(forWritingAt: .init(filename), options: .newFile(replaceExisting: true)) { handle in
             let request = S3.GetObjectRequest(bucket: from.bucket, key: from.key, options: options)
             let response = try await self.s3.getObject(request, logger: self.logger)
             var bytesDownloaded = 0
             let fileSize = response.contentLength ?? 1
             for try await buffer in response.body {
+                try await handle.write(contentsOf: buffer, toAbsoluteOffset: Int64(bytesDownloaded))
                 bytesDownloaded += buffer.readableBytes
-                try await self.fileIO.write(fileHandle: fileHandle, buffer: buffer)
                 try await progress(Double(bytesDownloaded) / Double(fileSize))
             }
         }
