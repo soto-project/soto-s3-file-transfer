@@ -215,7 +215,7 @@ struct S3FileTransferManagerTests {
 
     @Test func testListFiles() async throws {
         try await withS3FileTransfer { s3FileTransfer in
-            let files = try await s3FileTransfer.listFiles(in: Self.rootPath)
+            let files = try await s3FileTransfer.listFiles(in: Self.rootPath + "/Tests")
             #expect(
                 files.firstIndex {
                     $0.name
@@ -302,11 +302,11 @@ struct S3FileTransferManagerTests {
     @Test func testCopyPathLocalToS3() async throws {
         try await testBucket { s3FileTransfer, bucket in
             let folder = S3Folder(bucket: bucket, key: "testCopyPathLocalToS3")
-            try await s3FileTransfer.copy(from: Self.rootPath, to: folder)
+            try await s3FileTransfer.copy(from: Self.rootPath + "/Sources", to: folder)
             let files = try await s3FileTransfer.listFiles(in: folder)
             #expect(
                 files.first(where: {
-                    $0.file.key == "testCopyPathLocalToS3/Sources/SotoS3FileTransfer/S3Path.swift"
+                    $0.file.key == "testCopyPathLocalToS3/SotoS3FileTransfer/S3Path.swift"
                 }) != nil
             )
         }
@@ -345,7 +345,7 @@ struct S3FileTransferManagerTests {
                 from: S3Folder(bucket: bucket, key: "testSyncPathLocalToS3_v2"),
                 to: TempFolderTrait.folder,
                 delete: true,
-                progress: { print($0) }
+                progress: { Logger.current.debug("\($0)") }
             )
 
             let files = try await s3FileTransfer.listFiles(in: TempFolderTrait.folder)
@@ -447,7 +447,7 @@ struct S3FileTransferManagerTests {
         do {
             let cancelled = ManagedAtomic(false)
             try await s3FileTransfer.copy(from: folder, to: localFolder) { progress in
-                print(progress)
+                Logger.current.debug("\(progress)")
                 // make sure we only cancel one task
                 if progress > 0.2, cancelled.exchange(true, ordering: .relaxed) == false {
                     throw CancellationError()
@@ -682,11 +682,11 @@ struct S3FileTransferManagerTests {
             try await s3FileTransfer.copy(
                 from: TempFileTrait.file.fullPath,
                 to: S3File(bucket: bucket, key: "testMultipartUploadDownload")
-            ) { print($0) }
+            )
             try await s3FileTransfer.copy(
                 from: S3File(bucket: bucket, key: "testMultipartUploadDownload"),
                 to: copy
-            ) { print($0) }
+            ) { Logger.current.debug("\($0)") }
 
             let buffer = try await ByteBuffer(contentsOf: FilePath(TempFileTrait.file.fullPath), maximumSizeAllowed: .unlimited)
             let buffer2 = try await ByteBuffer(contentsOf: FilePath(copy), maximumSizeAllowed: .unlimited)
@@ -702,7 +702,7 @@ struct S3FileTransferManagerTests {
             try await s3FileTransfer.copy(
                 from: TempFileTrait.file.fullPath,
                 to: S3File(bucket: bucket, key: "testS3MultipartCopy")
-            ) { print($0) }
+            )
             try await s3FileTransfer.copy(
                 from: S3File(bucket: bucket, key: "testS3MultipartCopy"),
                 to: S3File(bucket: bucket, key: "testS3MultipartCopy_Copy")
@@ -710,7 +710,7 @@ struct S3FileTransferManagerTests {
             try await s3FileTransfer.copy(
                 from: S3File(bucket: bucket, key: "testS3MultipartCopy_Copy"),
                 to: copy
-            ) { print($0) }
+            ) { Logger.current.debug("\($0)") }
 
             let buffer = try await ByteBuffer(contentsOf: FilePath(TempFileTrait.file.fullPath), maximumSizeAllowed: .unlimited)
             let buffer2 = try await ByteBuffer(contentsOf: FilePath(copy), maximumSizeAllowed: .unlimited)
@@ -731,10 +731,7 @@ struct S3FileTransferManagerTests {
             try await s3FileTransfer.sync(
                 from: "\(Self.rootPath)/.build/checkouts/soto/Sources/Soto/Services",
                 to: folder,
-                delete: true,
-                progress: {
-                    print($0)
-                }
+                delete: true
             )
             try await s3FileTransfer.sync(from: folder, to: folder2, delete: true)
             try await s3FileTransfer.sync(
@@ -746,7 +743,7 @@ struct S3FileTransferManagerTests {
                 from: folder2.subFolder("S3"),
                 to: tempFolder,
                 delete: true
-            ) { print($0) }
+            ) { Logger.current.debug("\($0)") }
             let files = try await s3FileTransfer.listFiles(in: tempFolder)
             #expect(files.count == fileCount)
         }
