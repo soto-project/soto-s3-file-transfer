@@ -13,11 +13,12 @@
 //===----------------------------------------------------------------------===//
 
 import SotoS3
-@testable import SotoS3FileTransfer
-import XCTest
+import Testing
 
-final class S3PathTests: XCTestCase {
-    func testS3Folder() {
+@testable import SotoS3FileTransfer
+
+struct S3PathTests {
+    @Test func testS3Folder() {
         let folder1 = S3Folder(url: "s3://my-bucket")
         let folder2 = S3Folder(url: "s3://my-bucket/")
         let folder3 = S3Folder(url: "S3://my-bucket/folder")
@@ -25,56 +26,56 @@ final class S3PathTests: XCTestCase {
         let folder5 = S3Folder(url: "S3://my-bucket/folder/folder2")
         let folder6 = S3Folder(url: "S4://my-bucket/folder/folder2")
 
-        XCTAssertEqual(folder1?.bucket, "my-bucket")
-        XCTAssertEqual(folder1?.key, "")
-        XCTAssertEqual(folder2?.bucket, "my-bucket")
-        XCTAssertEqual(folder2?.key, "")
-        XCTAssertEqual(folder3?.bucket, "my-bucket")
-        XCTAssertEqual(folder3?.key, "folder/")
-        XCTAssertEqual(folder4?.bucket, "my-bucket")
-        XCTAssertEqual(folder4?.key, "folder/")
-        XCTAssertEqual(folder5?.bucket, "my-bucket")
-        XCTAssertEqual(folder5?.key, "folder/folder2/")
-        XCTAssertNil(folder6)
+        #expect(folder1?.bucket == "my-bucket")
+        #expect(folder1?.key == "")
+        #expect(folder2?.bucket == "my-bucket")
+        #expect(folder2?.key == "")
+        #expect(folder3?.bucket == "my-bucket")
+        #expect(folder3?.key == "folder/")
+        #expect(folder4?.bucket == "my-bucket")
+        #expect(folder4?.key == "folder/")
+        #expect(folder5?.bucket == "my-bucket")
+        #expect(folder5?.key == "folder/folder2/")
+        #expect(folder6 == nil)
     }
 
-    func testS3File() {
+    @Test func testS3File() {
         let file1 = S3File(url: "s3://my-bucket/file")
         let file2 = S3File(url: "S3://my-bucket/folder/file")
         let file3 = S3File(url: "s3://my-bucket/file/")
 
-        XCTAssertEqual(file1?.bucket, "my-bucket")
-        XCTAssertEqual(file1?.key, "file")
-        XCTAssertEqual(file2?.bucket, "my-bucket")
-        XCTAssertEqual(file2?.key, "folder/file")
-        XCTAssertNil(file3)
+        #expect(file1?.bucket == "my-bucket")
+        #expect(file1?.key == "file")
+        #expect(file2?.bucket == "my-bucket")
+        #expect(file2?.key == "folder/file")
+        #expect(file3 == nil)
     }
 
-    func testURL() {
+    @Test func testURL() {
         let file = S3File(url: "s3://bucket/folder/file")
-        XCTAssertEqual(file?.url, "s3://bucket/folder/file")
+        #expect(file?.url == "s3://bucket/folder/file")
     }
 
-    func testSubFolder() {
+    @Test func testSubFolder() {
         let folder = S3Folder(url: "s3://bucket/folder")
         let subfolder = folder?.subFolder("folder2")
-        XCTAssertEqual(subfolder?.url, "s3://bucket/folder/folder2/")
+        #expect(subfolder?.url == "s3://bucket/folder/folder2/")
     }
 
-    func testFileInFolder() {
+    @Test func testFileInFolder() {
         let folder = S3Folder(url: "s3://bucket/folder")
         let file = folder?.file("file")
-        XCTAssertEqual(file?.url, "s3://bucket/folder/file")
+        #expect(file?.url == "s3://bucket/folder/file")
     }
 
-    func testFileNameExtension() {
+    @Test func testFileNameExtension() {
         let file = S3File(url: "s3://bucket/folder/file.txt")
         let name = file?.name
         let nameWithoutExtension = file?.nameWithoutExtension
         let `extension` = file?.extension
 
-        XCTAssertEqual(name, "file.txt")
-        XCTAssertEqual(nameWithoutExtension, "file")
-        XCTAssertEqual(`extension`, "txt")
+        #expect(name == "file.txt")
+        #expect(nameWithoutExtension == "file")
+        #expect(`extension` == "txt")
     }
 }

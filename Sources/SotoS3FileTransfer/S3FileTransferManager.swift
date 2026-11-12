@@ -69,6 +69,7 @@ public final class S3FileTransferManager: Sendable {
     }
 
     /// Errors created by S3TransferManager
+    @nonexhaustive
     public enum Error: Swift.Error {
         /// File you referenced doesn't exist
         case fileDoesNotExist(String)
