@@ -20,12 +20,12 @@ public protocol S3Path: Equatable, CustomStringConvertible, Sendable {
     var key: String { get }
 }
 
-public extension S3Path {
+extension S3Path {
     /// return in URL form `s3://<bucketname>/<path>`
-    var url: String { return "s3://\(bucket)/\(key)" }
+    public var url: String { "s3://\(bucket)/\(key)" }
 
     /// return parent folder
-    func parent() -> S3Folder? {
+    public func parent() -> S3Folder? {
         let path = self.key.removingSuffix("/")
         guard path.count > 0 else { return nil }
         guard let slash: String.Index = path.lastIndex(of: "/") else { return S3Folder(bucket: bucket, key: "") }
@@ -33,11 +33,11 @@ public extension S3Path {
     }
 
     /// CustomStringConvertible protocol requirement
-    var description: String { return self.url }
+    public var description: String { self.url }
 }
 
 /// S3 file descriptor
-public struct S3File: S3Path {
+public struct S3FilePath: S3Path {
     /// s3 bucket name
     public let bucket: String
     /// path inside s3 bucket
@@ -111,15 +111,15 @@ public struct S3Folder: S3Path {
 
     /// Return file inside folder
     /// - Parameter name: file name
-    public func file(_ name: String) -> S3File {
+    public func file(_ name: String) -> S3FilePath {
         guard name.firstIndex(of: "/") == nil else {
             preconditionFailure("Filename \(name) cannot include '/'")
         }
-        return S3File(bucket: self.bucket, key: "\(self.key)\(name)")
+        return S3FilePath(bucket: self.bucket, key: "\(self.key)\(name)")
     }
 }
 
-internal extension String {
+extension String {
     func removingPrefix(_ prefix: String) -> String {
         guard hasPrefix(prefix) else { return self }
         return String(dropFirst(prefix.count))

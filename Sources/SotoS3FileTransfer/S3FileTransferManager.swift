@@ -54,30 +54,32 @@ public final class S3FileTransferManager: Sendable {
     /// List of file downloads to perform. This is return in a downloadFailed
     /// error and can be passed to the resume function to resume the download
     public struct DownloadOperation: Sendable {
-        let transfers: [(from: S3FileDescriptor, to: String)]
+        let transfers: [(from: S3FileDescriptor, to: FilePath)]
     }
 
     /// List of file uploads to perform. This is return in a uploadFailed
     /// error and can be passed to the resume function to resume the download
     public struct UploadOperation: Sendable {
-        let transfers: [(from: FileDescriptor, to: S3File)]
+        let transfers: [(from: FileDescriptor, to: S3FilePath)]
     }
 
     /// List of file copies to perform. This is return in a copyFailed
     /// error and can be passed to the resume function to resume the download
     public struct CopyOperation: Sendable {
-        let transfers: [(from: S3FileDescriptor, to: S3File)]
+        let transfers: [(from: S3FileDescriptor, to: S3FilePath)]
     }
 
     /// Errors created by S3TransferManager
     @nonexhaustive
     public enum Error: Swift.Error {
         /// File you referenced doesn't exist
-        case fileDoesNotExist(String)
+        case fileDoesNotExist(FilePath)
         /// Failed to create a folder during a download
-        case failedToCreateFolder(String)
+        case failedToCreateFolder(FilePath)
+        /// File you referenced doesn't exist
+        case s3FileDoesNotExist(S3FilePath)
         /// Failed to enumerate the contents of a folder
-        case failedToEnumerateFolder(String)
+        case failedToEnumerateFolder(FilePath)
         /// Cannot download file from S3 as it is a folder on your local file system
         case fileFolderClash(String, String)
         /// download failed
@@ -124,13 +126,13 @@ public final class S3FileTransferManager: Sendable {
     ///   - to: S3 file
     ///   - progress: progress function, updated with value from 0 to 1 based on how much we have uploaded
     public func copy(
-        from: String,
-        to: S3File,
+        from: FilePath,
+        to: S3FilePath,
         options: PutOptions = .init(),
         progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
     ) async throws {
         self.logger.debug("Copy from: \(from) to \(to)")
-        guard let info = try await self.fileSystem.info(forFileAt: .init(from)) else {
+        guard let info = try await self.fileSystem.info(forFileAt: from) else {
             throw Error.fileDoesNotExist(from)
         }
         let fileSize = Int(info.size)
@@ -140,7 +142,7 @@ public final class S3FileTransferManager: Sendable {
             _ = try await self.s3.multipartUpload(
                 request,
                 partSize: self.configuration.multipartPartSize,
-                filename: from,
+                filename: from.string,
                 abortOnFail: true,
                 threadPool: self.threadPool,
                 logger: self.logger,
@@ -149,7 +151,7 @@ public final class S3FileTransferManager: Sendable {
             try? await progress(1.0)
         } else {
             let fileSystem = FileSystem(threadPool: self.threadPool)
-            try await fileSystem.withFileHandle(forReadingAt: .init(from)) { handle in
+            try await fileSystem.withFileHandle(forReadingAt: from) { handle in
                 let request = try await S3.PutObjectRequest(
                     body: .init(asyncSequence: handle.readChunks(chunkLength: .kibibytes(64)), length: Int(handle.info().size)),
                     bucket: to.bucket,
@@ -168,8 +170,8 @@ public final class S3FileTransferManager: Sendable {
     ///   - to: local filename
     ///   - progress: progress function, updated with value from 0 to 1 based on how much we have uploaded
     public func copy(
-        from: S3File,
-        to: String,
+        from: S3FilePath,
+        to: FilePath,
         options: GetOptions = .init(),
         progress: @escaping (Double) async throws -> Void = { _ in }
     ) async throws {
@@ -180,35 +182,26 @@ public final class S3FileTransferManager: Sendable {
             _ = try await self.s3.headObject(.init(bucket: from.bucket, key: from.key), logger: self.logger)
         } catch {
             if let error = error as? S3ErrorType, case .notFound = error.error {
-                throw Error.fileDoesNotExist(String(describing: from))
+                throw Error.s3FileDoesNotExist(from)
             }
             throw error
         }
         // if `to` is a folder append name of object to end of `to` string to place object in folder `to`.
         var filename = to
-        if let info = try await fileSystem.info(forFileAt: .init(to)), info.type == .directory {
-            if var lastSlash = from.key.lastIndex(of: "/") {
-                lastSlash = from.key.index(after: lastSlash)
-                filename = "\(to)/\(from.key[lastSlash...])"
-            } else {
-                filename = "\(to)/\(from.key)"
+        if let info = try await fileSystem.info(forFileAt: to) {
+            if info.type == .directory {
+                guard let s3FileName = FilePath(from.key).lastComponent else {
+                    throw Error.s3FileDoesNotExist(from)
+                }
+                filename = to.appending(s3FileName)
             }
         } else {
             // create folder to place file in, if it doesn't exist already
-            let folder: String
-            if let lastSlash = to.lastIndex(of: "/") {
-                folder = String(to[..<lastSlash])
-            } else {
-                folder = to
-            }
-            if let info = try await fileSystem.info(forFileAt: .init(to)) {
-                guard info.type == .directory else { throw Error.failedToCreateFolder(folder) }
-            } else {
-                try await fileSystem.createDirectory(at: .init(folder), withIntermediateDirectories: true)
-            }
+            let folder = to.removingLastComponent()
+            try await fileSystem.createDirectory(at: folder, withIntermediateDirectories: true)
         }
         // if the file exists truncate prior writting to it
-        try await self.fileSystem.withFileHandle(forWritingAt: .init(filename), options: .newFile(replaceExisting: true)) { handle in
+        try await self.fileSystem.withFileHandle(forWritingAt: filename, options: .newFile(replaceExisting: true)) { handle in
             let request = S3.GetObjectRequest(bucket: from.bucket, key: from.key, options: options)
             let response = try await self.s3.getObject(request, logger: self.logger)
             var bytesDownloaded = 0
@@ -228,8 +221,8 @@ public final class S3FileTransferManager: Sendable {
     ///   - fileSize: Size of file to copy. If you don't provide this then function will call `headObject` to ascertain this
     ///   - options: Options while copying
     public func copy(
-        from: S3File,
-        to: S3File,
+        from: S3FilePath,
+        to: S3FilePath,
         fileSize: Int? = nil,
         options: CopyOptions = .init()
     ) async throws {
@@ -252,7 +245,7 @@ public final class S3FileTransferManager: Sendable {
             }
         } catch {
             if let error = error as? S3ErrorType, case .notFound = error.error {
-                throw Error.fileDoesNotExist(String(describing: from))
+                throw Error.s3FileDoesNotExist(from)
             }
             throw error
         }
@@ -263,14 +256,19 @@ public final class S3FileTransferManager: Sendable {
     ///   - from: local folder
     ///   - to: Path to S3 folder
     public func copy(
-        from folder: String,
+        from folder: FilePath,
         to s3Folder: S3Folder,
         options: PutOptions = .init(),
         progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
     ) async throws {
         let files = try await listFiles(in: folder)
-        let folderResolved = URL(fileURLWithPath: folder).standardizedFileURL.resolvingSymlinksInPath()
-        let transfers = Self.targetFiles(files: files, from: folderResolved.path, to: s3Folder)
+        let folderResolved: FilePath
+        do {
+            folderResolved = try await fileSystem.destinationOfSymbolicLink(at: folder)
+        } catch let error as FileSystemError where error.code == .invalidArgument {
+            folderResolved = folder
+        }
+        let transfers = Self.targetFiles(files: files, from: folderResolved, to: s3Folder)
         try await self.copy(transfers, options: options, progress: progress)
     }
 
@@ -280,7 +278,7 @@ public final class S3FileTransferManager: Sendable {
     ///   - to: Local folder
     public func copy(
         from s3Folder: S3Folder,
-        to folder: String,
+        to folder: FilePath,
         options: GetOptions = .init(),
         progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
     ) async throws {
@@ -315,7 +313,7 @@ public final class S3FileTransferManager: Sendable {
     ///   - to: Path to destination S3 folder
     ///   - delete: Should we delete files on S3 that don't exists locally
     public func sync(
-        from folder: String,
+        from folder: FilePath,
         to s3Folder: S3Folder,
         delete: Bool,
         options: PutOptions = .init(),
@@ -323,10 +321,15 @@ public final class S3FileTransferManager: Sendable {
     ) async throws {
         let files = try await listFiles(in: folder)
         let s3Files = try await listFiles(in: s3Folder)
-        let folderResolved = URL(fileURLWithPath: folder).standardizedFileURL.resolvingSymlinksInPath()
-        let targetFiles = Self.targetFiles(files: files, from: folderResolved.path, to: s3Folder)
+        let folderResolved: FilePath
+        do {
+            folderResolved = try await fileSystem.destinationOfSymbolicLink(at: folder)
+        } catch let error as FileSystemError where error.code == .invalidArgument {
+            folderResolved = folder
+        }
+        let targetFiles = Self.targetFiles(files: files, from: folderResolved, to: s3Folder)
         let s3KeyMap = Dictionary(uniqueKeysWithValues: s3Files.map { ($0.file.key, $0) })
-        let transfers = targetFiles.compactMap { transfer -> (from: FileDescriptor, to: S3File)? in
+        let transfers = targetFiles.compactMap { transfer -> (from: FileDescriptor, to: S3FilePath)? in
             // does file exist on S3
             guard let s3File = s3KeyMap[transfer.to.key] else { return transfer }
             // does file on S3 have a later date
@@ -337,7 +340,7 @@ public final class S3FileTransferManager: Sendable {
         // construct list of files to delete, if we are doing deletion
         if delete == true {
             let targetKeys = Set(targetFiles.map { $0.to.key })
-            let deletions = s3Files.compactMap { s3File -> S3File? in
+            let deletions = s3Files.compactMap { s3File -> S3FilePath? in
                 if targetKeys.contains(s3File.file.key) {
                     return nil
                 } else {
@@ -359,7 +362,7 @@ public final class S3FileTransferManager: Sendable {
     ///   - delete: Should we delete files locally that don't exists in S3
     public func sync(
         from s3Folder: S3Folder,
-        to folder: String,
+        to folder: FilePath,
         delete: Bool,
         options: GetOptions = .init(),
         progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
@@ -369,7 +372,7 @@ public final class S3FileTransferManager: Sendable {
         let validatedS3Files = try self.validateFileList(s3Files, ignoreClashes: options.ignoreFileFolderClashes)
         let targetFiles = Self.targetFiles(files: validatedS3Files, from: s3Folder, to: folder)
         let fileNameMap = Dictionary(uniqueKeysWithValues: files.map { ($0.name, $0) })
-        let transfers = targetFiles.compactMap { transfer -> (from: S3FileDescriptor, to: String)? in
+        let transfers = targetFiles.compactMap { transfer -> (from: S3FileDescriptor, to: FilePath)? in
             // does file exist locally
             guard let file = fileNameMap[transfer.to] else { return transfer }
             // does local file have a later date
@@ -379,7 +382,7 @@ public final class S3FileTransferManager: Sendable {
         // construct list of files to delete, if we are doing deletion
         if delete == true {
             let targetTos = Set(targetFiles.map { $0.to })
-            let deletions = files.compactMap { file -> String? in
+            let deletions = files.compactMap { file -> FilePath? in
                 if targetTos.contains(file.name) {
                     return nil
                 } else {
@@ -420,7 +423,7 @@ public final class S3FileTransferManager: Sendable {
         let destFiles = try await listFiles(in: destFolder)
         let targetFiles = Self.targetFiles(files: srcFiles, from: srcFolder, to: destFolder)
         let destKeyMap = Dictionary(uniqueKeysWithValues: destFiles.map { ($0.file.key, $0) })
-        let transfers = targetFiles.compactMap { transfer -> (from: S3FileDescriptor, to: S3File)? in
+        let transfers = targetFiles.compactMap { transfer -> (from: S3FileDescriptor, to: S3FilePath)? in
             // does file exist in destination folder
             guard let file = destKeyMap[transfer.to.key] else { return transfer }
             // does local file have a later date
@@ -435,7 +438,7 @@ public final class S3FileTransferManager: Sendable {
         // construct list of files to delete, if we are doing deletion
         if delete == true {
             let targetKeys = Set(targetFiles.map { $0.to.key })
-            let deletions = destFiles.compactMap { file -> S3File? in
+            let deletions = destFiles.compactMap { file -> S3FilePath? in
                 if targetKeys.contains(file.file.key) {
                     return nil
                 } else {
@@ -559,7 +562,7 @@ public final class S3FileTransferManager: Sendable {
     }
 
     /// delete a file on S3
-    public func delete(_ s3File: S3File) async throws {
+    public func delete(_ s3File: S3FilePath) async throws {
         self.logger.debug("Deleting \(s3File)")
         _ = try await self.s3.deleteObject(.init(bucket: s3File.bucket, key: s3File.key), logger: self.logger)
     }
@@ -577,7 +580,7 @@ public final class S3FileTransferManager: Sendable {
 
 extension S3FileTransferManager {
     struct FileDescriptor: Equatable, Sendable {
-        let name: String
+        let name: FilePath
         let modificationDate: Date
         let size: Int
     }
@@ -585,7 +588,7 @@ extension S3FileTransferManager {
     /// A descriptor representing a file stored in an S3 bucket.
     public struct S3FileDescriptor: Equatable, Sendable {
         /// The S3 file represented by this descriptor.
-        public let file: S3File
+        public let file: S3FilePath
         /// The date and time when the file was last modified.
         public let modificationDate: Date
         /// The size of the file in bytes.
@@ -593,9 +596,9 @@ extension S3FileTransferManager {
     }
 
     /// List files in local folder
-    func listFiles(in folder: String) async throws -> [FileDescriptor] {
-        func _listFiles(in folder: String) async throws -> [FileDescriptor] {
-            try await fileSystem.withDirectoryHandle(atPath: .init(folder)) { handle in
+    func listFiles(in folder: FilePath) async throws -> [FileDescriptor] {
+        func _listFiles(in folder: FilePath) async throws -> [FileDescriptor] {
+            try await fileSystem.withDirectoryHandle(atPath: folder) { handle in
                 var files: [FileDescriptor] = []
                 let entries = handle.listContents()
                 for try await entry in entries {
@@ -610,10 +613,10 @@ extension S3FileTransferManager {
                             timeIntervalSince1970: TimeInterval(info.lastDataModificationTime.seconds)
                                 + (TimeInterval(info.lastDataModificationTime.nanoseconds) / 1_000_000_000)
                         )
-                        files.append(.init(name: entry.path.string, modificationDate: modificationDate, size: Int(info.size)))
+                        files.append(.init(name: entry.path, modificationDate: modificationDate, size: Int(info.size)))
 
                     case .directory:
-                        let subfolderFiles = try await _listFiles(in: entry.path.string)
+                        let subfolderFiles = try await _listFiles(in: entry.path)
                         files.append(contentsOf: subfolderFiles)
 
                     default:
@@ -643,7 +646,7 @@ extension S3FileTransferManager {
                         let fileSize = $0.size
                     else { return nil }
                     return S3FileDescriptor(
-                        file: S3File(bucket: folder.bucket, key: key),
+                        file: S3FilePath(bucket: folder.bucket, key: key),
                         modificationDate: lastModified,
                         size: Int(fileSize)
                     )
@@ -660,8 +663,8 @@ extension S3FileTransferManager {
         let list = list.sorted { $0.file.key < $1.file.key }
         return try list.reduce([]) { result, file -> [S3FileDescriptor] in
             let filename = file.file.key
-            return try result.compactMap {
-                let prevFilename = $0.file.key
+            return try result.compactMap { (file2) -> S3FileDescriptor? in
+                let prevFilename = file2.file.key
                 if filename.hasPrefix(prevFilename),
                     prevFilename.last == "/" || filename.dropFirst(prevFilename.count).first == "/"
                 {
@@ -671,25 +674,25 @@ extension S3FileTransferManager {
                         throw Error.fileFolderClash(prevFilename, filename)
                     }
                 }
-                return $0
+                return file2
             } + [file]
         }
     }
 
     /// Internal version of copy from local file system to S3
     func copy(
-        _ transfers: [(from: FileDescriptor, to: S3File)],
+        _ transfers: [(from: FileDescriptor, to: S3FilePath)],
         options: PutOptions,
         progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
     ) async throws {
         enum UploadTaskResult {
             case success
-            case failed(error: Swift.Error, from: FileDescriptor, to: S3File)
+            case failed(error: Swift.Error, from: FileDescriptor, to: S3FilePath)
         }
 
         let result = await withTaskGroup(of: UploadTaskResult.self) { group in
             var count = 0
-            var failedTransfers: [(from: FileDescriptor, to: S3File)] = []
+            var failedTransfers: [(from: FileDescriptor, to: S3FilePath)] = []
             var error: Swift.Error?
             let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
 
@@ -735,18 +738,18 @@ extension S3FileTransferManager {
 
     /// Internal version of copy from S3 to local file system
     func copy(
-        _ transfers: [(from: S3FileDescriptor, to: String)],
+        _ transfers: [(from: S3FileDescriptor, to: FilePath)],
         options: GetOptions,
         progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
     ) async throws {
         enum DownloadTaskResult {
             case success
-            case failed(error: Swift.Error, from: S3FileDescriptor, to: String)
+            case failed(error: Swift.Error, from: S3FileDescriptor, to: FilePath)
         }
 
         let result = await withTaskGroup(of: DownloadTaskResult.self) { group in
             var count = 0
-            var failedTransfers: [(from: S3FileDescriptor, to: String)] = []
+            var failedTransfers: [(from: S3FileDescriptor, to: FilePath)] = []
             var error: Swift.Error?
             let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
 
@@ -792,18 +795,18 @@ extension S3FileTransferManager {
 
     /// Internal version of copy from S3 to S3
     func copy(
-        _ transfers: [(from: S3FileDescriptor, to: S3File)],
+        _ transfers: [(from: S3FileDescriptor, to: S3FilePath)],
         options: CopyOptions,
         progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
     ) async throws {
         enum CopyTaskResult {
             case success
-            case failed(error: Swift.Error, from: S3FileDescriptor, to: S3File)
+            case failed(error: Swift.Error, from: S3FileDescriptor, to: S3FilePath)
         }
 
         let result = await withTaskGroup(of: CopyTaskResult.self) { group in
             var count = 0
-            var failedTransfers: [(from: S3FileDescriptor, to: S3File)] = []
+            var failedTransfers: [(from: S3FileDescriptor, to: S3FilePath)] = []
             var error: Swift.Error?
             let folderProgress = FolderUploadProgress(transfers.map { $0.from }, progress: progress)
 
@@ -851,15 +854,15 @@ extension S3FileTransferManager {
     }
 
     /// delete a local file
-    func delete(_ file: String) async throws {
+    func delete(_ file: FilePath) async throws {
         self.logger.debug("Deleting \(file)")
-        try await self.fileSystem.removeItem(at: .init(file))
+        try await self.fileSystem.removeItem(at: file)
     }
 
     /// delete files on S3.
     ///
     /// This assumes all files are in the same bucket
-    func delete(_ s3Files: [S3File]) async throws {
+    func delete(_ s3Files: [S3FilePath]) async throws {
         guard let first = s3Files.first else { return }
         let request = S3.DeleteObjectsRequest(
             bucket: first.bucket,
@@ -870,29 +873,37 @@ extension S3FileTransferManager {
 
     /// convert file descriptors to equivalent S3 file descriptors when copying one folder
     /// to another. Function assumes the files have srcFolder prefixed
-    static func targetFiles(files: [FileDescriptor], from srcFolder: String, to destFolder: S3Folder) -> [(from: FileDescriptor, to: S3File)] {
-        let srcFolder = srcFolder.appendingSuffixIfNeeded("/")
-        return files.map { file in
-            let pathRelative = file.name.removingPrefix(srcFolder)
-            return (from: file, to: S3File(bucket: destFolder.bucket, key: destFolder.key + pathRelative))
+    static func targetFiles(files: [FileDescriptor], from srcFolder: FilePath, to destFolder: S3Folder) -> [(from: FileDescriptor, to: S3FilePath)] {
+        files.map { file in
+            var pathRelative = file.name
+            // TODO: Verify path
+            _ = pathRelative.removePrefix(srcFolder)
+            return (from: file, to: S3FilePath(bucket: destFolder.bucket, key: destFolder.key + pathRelative.string))
         }
     }
 
     /// convert S3 file descriptors to equivalent file descriptors when copying files from
     /// the S3 folder to a local folder. Function assumes the S3 files have the source path
     /// prefixed
-    static func targetFiles(files: [S3FileDescriptor], from srcFolder: S3Folder, to destFolder: String) -> [(from: S3FileDescriptor, to: String)] {
-        let destFolder = destFolder.appendingSuffixIfNeeded("/")
-        return files.map { file in
+    static func targetFiles(
+        files: [S3FileDescriptor],
+        from srcFolder: S3Folder,
+        to destFolder: FilePath
+    ) -> [(from: S3FileDescriptor, to: FilePath)] {
+        files.map { file in
             let pathRelative = file.file.key.removingPrefix(srcFolder.key)
-            return (from: file, to: destFolder + pathRelative)
+            return (from: file, to: destFolder.appending(pathRelative))
         }
     }
 
     /// convert S3 file descriptors to equivalent S3 file descriptors when copying files from
     /// the S3 folder to another S3 folder. Function assumes the S3 files have the source path
     /// prefixed
-    static func targetFiles(files: [S3FileDescriptor], from srcFolder: S3Folder, to destFolder: S3Folder) -> [(from: S3FileDescriptor, to: S3File)] {
+    static func targetFiles(
+        files: [S3FileDescriptor],
+        from srcFolder: S3Folder,
+        to destFolder: S3Folder
+    ) -> [(from: S3FileDescriptor, to: S3FilePath)] {
         files.map { file in
             let pathRelative = file.file.key.removingPrefix(srcFolder.key)
             return (from: file, to: .init(bucket: destFolder.bucket, key: destFolder.key + pathRelative))
