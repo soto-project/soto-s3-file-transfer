@@ -24,14 +24,6 @@ extension S3Path {
     /// return in URL form `s3://<bucketname>/<path>`
     public var url: String { "s3://\(bucket)/\(key)" }
 
-    /// return parent folder
-    public func parent() -> S3Folder? {
-        let path = self.key.removingSuffix("/")
-        guard path.count > 0 else { return nil }
-        guard let slash: String.Index = path.lastIndex(of: "/") else { return S3Folder(bucket: bucket, key: "") }
-        return S3Folder(bucket: bucket, key: String(path[path.startIndex...slash]))
-    }
-
     /// CustomStringConvertible protocol requirement
     public var description: String { self.url }
 }
@@ -123,16 +115,6 @@ extension String {
     func removingPrefix(_ prefix: String) -> String {
         guard hasPrefix(prefix) else { return self }
         return String(dropFirst(prefix.count))
-    }
-
-    func appendingPrefixIfNeeded(_ prefix: String) -> String {
-        guard !hasPrefix(prefix) else { return self }
-        return prefix + self
-    }
-
-    func removingSuffix(_ suffix: String) -> String {
-        guard hasSuffix(suffix) else { return self }
-        return String(dropLast(suffix.count))
     }
 
     func appendingSuffixIfNeeded(_ suffix: String) -> String {
