@@ -35,7 +35,7 @@ internal enum Environment {
 enum TestEnvironment {
     /// are we using Localstack to test. Also return use localstack if we are running a github action and don't have an access key if
     static var isUsingLocalstack: Bool {
-        Environment["AWS_ENDPOINT_URL"] == "http://localhost:4566"
+        Environment["AWS_ENDPOINT_URL"] == "http://localhost:4566" || Environment["AWS_ENDPOINT_URL"] == "http://localstack:4566"
     }
 
     static var credentialProvider: CredentialProviderFactory {
