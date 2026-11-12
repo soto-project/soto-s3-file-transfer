@@ -262,13 +262,7 @@ public final class S3FileTransferManager: Sendable {
         progress: @escaping @Sendable (Double) async throws -> Void = { _ in }
     ) async throws {
         let files = try await listFiles(in: folder)
-        let folderResolved: FilePath
-        do {
-            folderResolved = try await fileSystem.destinationOfSymbolicLink(at: folder)
-        } catch let error as FileSystemError where error.code == .invalidArgument {
-            folderResolved = folder
-        }
-        let transfers = Self.targetFiles(files: files, from: folderResolved, to: s3Folder)
+        let transfers = Self.targetFiles(files: files, from: folder, to: s3Folder)
         try await self.copy(transfers, options: options, progress: progress)
     }
 
@@ -321,13 +315,7 @@ public final class S3FileTransferManager: Sendable {
     ) async throws {
         let files = try await listFiles(in: folder)
         let s3Files = try await listFiles(in: s3Folder)
-        let folderResolved: FilePath
-        do {
-            folderResolved = try await fileSystem.destinationOfSymbolicLink(at: folder)
-        } catch let error as FileSystemError where error.code == .invalidArgument {
-            folderResolved = folder
-        }
-        let targetFiles = Self.targetFiles(files: files, from: folderResolved, to: s3Folder)
+        let targetFiles = Self.targetFiles(files: files, from: folder, to: s3Folder)
         let s3KeyMap = Dictionary(uniqueKeysWithValues: s3Files.map { ($0.file.key, $0) })
         let transfers = targetFiles.compactMap { transfer -> (from: FileDescriptor, to: S3FilePath)? in
             // does file exist on S3
@@ -604,7 +592,7 @@ extension S3FileTransferManager {
                 for try await entry in entries {
                     guard entry.name.string.first != "." else { continue }
                     switch entry.type {
-                    case .regular, .symlink:
+                    case .regular:
                         guard let info = try await fileSystem.info(forFileAt: entry.path) else {
                             continue
                         }
@@ -618,6 +606,26 @@ extension S3FileTransferManager {
                     case .directory:
                         let subfolderFiles = try await _listFiles(in: entry.path)
                         files.append(contentsOf: subfolderFiles)
+
+                    case .symlink:
+                        guard let info = try await fileSystem.info(forFileAt: entry.path) else {
+                            continue
+                        }
+                        switch info.type {
+                        case .regular:
+                            let modificationDate = Date(
+                                timeIntervalSince1970: TimeInterval(info.lastDataModificationTime.seconds)
+                                    + (TimeInterval(info.lastDataModificationTime.nanoseconds) / 1_000_000_000)
+                            )
+                            files.append(.init(name: entry.path, modificationDate: modificationDate, size: Int(info.size)))
+
+                        case .directory:
+                            let subfolderFiles = try await _listFiles(in: entry.path)
+                            files.append(contentsOf: subfolderFiles)
+
+                        default:
+                            break
+                        }
 
                     default:
                         break
