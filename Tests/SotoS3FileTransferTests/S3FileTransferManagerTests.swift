@@ -226,6 +226,14 @@ struct S3FileTransferManagerTests {
         }
     }
 
+    @Test(.tempFolder("testListFilesIgnoresHiddenFiles"), .tempFile(.path(".hiddenFile")))
+    func testListFilesIgnoresHiddenFiles() async throws {
+        try await withS3FileTransfer { s3FileTransfer in
+            let files = try await s3FileTransfer.listFiles(in: TempFolderTrait.folder)
+            #expect(files.count == 0)
+        }
+    }
+
     @Test func testListS3Files() async throws {
         let test = "testListS3Files"
         try await testBucket { s3FileTransfer, bucket in
