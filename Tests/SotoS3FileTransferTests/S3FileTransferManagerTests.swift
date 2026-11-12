@@ -722,6 +722,56 @@ struct S3FileTransferManagerTests {
         }
     }
 
+    @Test(.tempFolder("testUploadSymbolicLink"), .tempSymbolicLink(destination: Self.rootPath.appending("Package.swift").string))
+    func testUploadSymbolicLink() async throws {
+        try await testBucket { s3FileTransfer, bucket in
+            try await s3FileTransfer.copy(
+                from: .init(TempFolderTrait.folder),
+                to: S3Folder(bucket: bucket, key: "/")
+            ) { Logger.current.debug("\($0)") }
+            let getObjectResponse = try await s3FileTransfer.s3.getObject(bucket: bucket, key: TempSymbolicLinkTrait.file.path)
+            let contents = try await getObjectResponse.body.collect(upTo: .max)
+            let contentsString = String(buffer: contents)
+            #expect(contentsString.hasPrefix("// swift-tools-version:"))
+        }
+    }
+
+    @Test(.tempSymbolicLink(destination: Self.rootPath.appending("Sources").string), .tempFolder("testUploadSymbolicLinkToFolder"))
+    func testUploadSymbolicLinkToFolder() async throws {
+        let tempFolder = FilePath(TempFolderTrait.folder)
+        try await testBucket { s3FileTransfer, bucket in
+            try await s3FileTransfer.copy(
+                from: .init(TempSymbolicLinkTrait.file.fullPath),
+                to: S3Folder(bucket: bucket, key: "/")
+            ) { Logger.current.debug("\($0)") }
+
+            try await s3FileTransfer.copy(from: S3Folder(bucket: bucket, key: "/"), to: tempFolder)
+            let files = try await s3FileTransfer.listFiles(in: tempFolder)
+            #expect(
+                files.first {
+                    $0.name.components.suffix(3) == ["testUploadSymbolicLinkToFolder", "SotoS3FileTransfer", "S3Path.swift"]
+                } != nil
+            )
+        }
+    }
+
+    @Test(.tempFolder("testUploadSymbolicLinkInSubFolder"), .tempSymbolicLink(destination: Self.rootPath.appending("Sources").string))
+    func testUploadSymbolicLinkInSubFolder() async throws {
+        try await testBucket { s3FileTransfer, bucket in
+            try await s3FileTransfer.copy(
+                from: .init(TempFolderTrait.folder),
+                to: S3Folder(bucket: bucket, key: "/temp")
+            ) { Logger.current.debug("\($0)") }
+            let files = try await s3FileTransfer.listFiles(in: S3Folder(bucket: bucket, key: "/temp/\(TempSymbolicLinkTrait.file.path)"))
+            print(files)
+            #expect(
+                files.first {
+                    $0.file.key == "temp/\(TempSymbolicLinkTrait.file.path)/SotoS3FileTransfer/S3Path.swift"
+                } != nil
+            )
+        }
+    }
+
     @Test(.tempFolder("testBigFolderUpload"))
     func testBigFolderUpload() async throws {
         try await testBucket { s3FileTransfer, bucket in
