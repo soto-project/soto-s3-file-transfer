@@ -40,9 +40,9 @@ struct S3PathTests {
     }
 
     @Test func testS3File() {
-        let file1 = S3File(url: "s3://my-bucket/file")
-        let file2 = S3File(url: "S3://my-bucket/folder/file")
-        let file3 = S3File(url: "s3://my-bucket/file/")
+        let file1 = S3FilePath(url: "s3://my-bucket/file")
+        let file2 = S3FilePath(url: "S3://my-bucket/folder/file")
+        let file3 = S3FilePath(url: "s3://my-bucket/file/")
 
         #expect(file1?.bucket == "my-bucket")
         #expect(file1?.key == "file")
@@ -52,7 +52,7 @@ struct S3PathTests {
     }
 
     @Test func testURL() {
-        let file = S3File(url: "s3://bucket/folder/file")
+        let file = S3FilePath(url: "s3://bucket/folder/file")
         #expect(file?.url == "s3://bucket/folder/file")
     }
 
@@ -69,7 +69,7 @@ struct S3PathTests {
     }
 
     @Test func testFileNameExtension() {
-        let file = S3File(url: "s3://bucket/folder/file.txt")
+        let file = S3FilePath(url: "s3://bucket/folder/file.txt")
         let name = file?.name
         let nameWithoutExtension = file?.nameWithoutExtension
         let `extension` = file?.extension

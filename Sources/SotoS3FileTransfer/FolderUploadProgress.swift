@@ -14,6 +14,7 @@
 
 import NIO
 import NIOConcurrencyHelpers
+import SystemPackage
 
 extension S3FileTransferManager {
     actor FolderUploadProgress {
@@ -32,7 +33,7 @@ extension S3FileTransferManager {
         }
 
         init(_ files: [FileDescriptor], progress: @escaping @Sendable (Double) async throws -> Void = { _ in }) {
-            self.sizes = .init(files.map { (key: $0.name, value: UInt64($0.size)) }) { first, _ in first }
+            self.sizes = .init(files.map { (key: $0.name.string, value: UInt64($0.size)) }) { first, _ in first }
             self.totalSize = self.sizes.values.reduce(UInt64(0), +)
             self.uploadedSize = 0
             self.currentUploadingSizes = [:]
@@ -47,6 +48,16 @@ extension S3FileTransferManager {
         func setFileUploaded(_ file: String) {
             self.currentUploadingSizes[file] = nil
             self.uploadedSize += self.sizes[file] ?? 0
+        }
+
+        func updateProgress(_ file: FilePath, progress: Double) async throws {
+            self.currentUploadingSizes[file.string] = self.sizes[file.string].map { UInt64(Double($0) * progress) } ?? 0
+            try await self.progressFunc(self.progress)
+        }
+
+        func setFileUploaded(_ file: FilePath) {
+            self.currentUploadingSizes[file.string] = nil
+            self.uploadedSize += self.sizes[file.string] ?? 0
         }
 
         var finished: Bool { self.totalSize == self.uploadedSize && self.currentUploadingSizes.count == 0 }
