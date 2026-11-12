@@ -184,37 +184,31 @@ public final class S3FileTransferManager: Sendable {
             }
             throw error
         }
-        let filename = try await self.threadPool.runIfActive { () -> String in
-            var to = to
-            // if `to` is a folder append name of object to end of `to` string to place object in folder `to`.
-            var isDirectory: ObjCBool = false
-            if FileManager.default.fileExists(atPath: to, isDirectory: &isDirectory), isDirectory.boolValue == true {
-                if var lastSlash = from.key.lastIndex(of: "/") {
-                    lastSlash = from.key.index(after: lastSlash)
-                    to = "\(to)/\(from.key[lastSlash...])"
-                } else {
-                    to = "\(to)/\(from.key)"
-                }
+        // if `to` is a folder append name of object to end of `to` string to place object in folder `to`.
+        var filename = to
+        if let info = try await fileSystem.info(forFileAt: .init(to)), info.type == .directory {
+            if var lastSlash = from.key.lastIndex(of: "/") {
+                lastSlash = from.key.index(after: lastSlash)
+                filename = "\(to)/\(from.key[lastSlash...])"
             } else {
-                // create folder to place file in, if it doesn't exist already
-                let folder: String
-                var isDirectory: ObjCBool = false
-                if let lastSlash = to.lastIndex(of: "/") {
-                    folder = String(to[..<lastSlash])
-                } else {
-                    folder = to
-                }
-                if FileManager.default.fileExists(atPath: folder, isDirectory: &isDirectory) {
-                    guard isDirectory.boolValue else { throw Error.failedToCreateFolder(folder) }
-                } else {
-                    try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
-                }
+                filename = "\(to)/\(from.key)"
             }
-            return to
+        } else {
+            // create folder to place file in, if it doesn't exist already
+            let folder: String
+            if let lastSlash = to.lastIndex(of: "/") {
+                folder = String(to[..<lastSlash])
+            } else {
+                folder = to
+            }
+            if let info = try await fileSystem.info(forFileAt: .init(to)) {
+                guard info.type == .directory else { throw Error.failedToCreateFolder(folder) }
+            } else {
+                try await fileSystem.createDirectory(at: .init(folder), withIntermediateDirectories: true)
+            }
         }
         // if the file exists truncate prior writting to it
-        let fileSystem = FileSystem(threadPool: self.threadPool)
-        try await fileSystem.withFileHandle(forWritingAt: .init(filename), options: .newFile(replaceExisting: true)) { handle in
+        try await self.fileSystem.withFileHandle(forWritingAt: .init(filename), options: .newFile(replaceExisting: true)) { handle in
             let request = S3.GetObjectRequest(bucket: from.bucket, key: from.key, options: options)
             let response = try await self.s3.getObject(request, logger: self.logger)
             var bytesDownloaded = 0
@@ -600,33 +594,36 @@ extension S3FileTransferManager {
 
     /// List files in local folder
     func listFiles(in folder: String) async throws -> [FileDescriptor] {
-        try await self.threadPool.runIfActive {
-            var files: [FileDescriptor] = []
-            let path = URL(fileURLWithPath: folder)
-            guard
-                let fileEnumerator = FileManager.default.enumerator(
-                    at: path,
-                    includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey, .fileSizeKey],
-                    options: .skipsHiddenFiles
-                )
-            else {
-                throw Error.failedToEnumerateFolder(folder)
+        func _listFiles(in folder: String) async throws -> [FileDescriptor] {
+            try await fileSystem.withDirectoryHandle(atPath: .init(folder)) { handle in
+                var files: [FileDescriptor] = []
+                let entries = handle.listContents()
+                for try await entry in entries {
+                    guard entry.name.string.first != "." else { continue }
+                    switch entry.type {
+                    case .regular, .symlink:
+                        guard let info = try await fileSystem.info(forFileAt: entry.path) else {
+                            continue
+                        }
+                        guard info.type == .regular else { continue }
+                        let modificationDate = Date(
+                            timeIntervalSince1970: TimeInterval(info.lastDataModificationTime.seconds)
+                                + (TimeInterval(info.lastDataModificationTime.nanoseconds) / 1_000_000_000)
+                        )
+                        files.append(.init(name: entry.path.string, modificationDate: modificationDate, size: Int(info.size)))
+
+                    case .directory:
+                        let subfolderFiles = try await _listFiles(in: entry.path.string)
+                        files.append(contentsOf: subfolderFiles)
+
+                    default:
+                        break
+                    }
+                }
+                return files
             }
-            while let file = fileEnumerator.nextObject() as? URL {
-                let fileResolved = file.resolvingSymlinksInPath()
-                var isDirectory: ObjCBool = false
-                // ignore if it is a directory
-                _ = FileManager.default.fileExists(atPath: fileResolved.path, isDirectory: &isDirectory)
-                guard !isDirectory.boolValue else { continue }
-                // get modification data and append along with file name
-                let attributes = try FileManager.default.attributesOfItem(atPath: fileResolved.path)
-                guard let modificationDate = attributes[.modificationDate] as? Date else { continue }
-                guard let size = attributes[.size] as? NSNumber else { continue }
-                let fileDescriptor = FileDescriptor(name: fileResolved.path, modificationDate: modificationDate, size: size.intValue)
-                files.append(fileDescriptor)
-            }
-            return files
         }
+        return try await _listFiles(in: folder)
     }
 
     /// Lists all files in the specified S3 folder.
@@ -856,9 +853,7 @@ extension S3FileTransferManager {
     /// delete a local file
     func delete(_ file: String) async throws {
         self.logger.debug("Deleting \(file)")
-        try await self.threadPool.runIfActive {
-            try FileManager.default.removeItem(atPath: file)
-        }
+        try await self.fileSystem.removeItem(at: .init(file))
     }
 
     /// delete files on S3.
